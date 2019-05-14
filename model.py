@@ -7,7 +7,7 @@ class GCNN(keras.Model):
     """ Model for a Graph Convolutional Network with dense graph structure. The graph is obtained using
     a Gaussian kernel on the pairwise node distances. """
 
-    def __init__(self, num_input_features, hidden_dimensions, num_classes, dropout_rate=0.5, use_batchnorm=True):
+    def __init__(self, num_input_features, hidden_dimensions, dropout_rate=0.5, use_batchnorm=True):
         """ Creates a GCNN model. 
 
         Parameters:
@@ -16,9 +16,6 @@ class GCNN(keras.Model):
             Number of features for the input. 
         hidden_dimensions : list
             A list of ints, representing the hidden dimensionalities of the filter weights.
-        num_classes : int
-            The number of classes. A graph convolution layer with according dimensionality and
-            a softmax are put the end of the computational pipeline of the model.
         dropout_rate : float
             Dropout rate.
         use_batchnorm : bool
@@ -28,19 +25,20 @@ class GCNN(keras.Model):
         self.adjacency_layer = AdjacencyMatrixLayer()
         self.blocks = [
             GCNNBlock(hidden_dimension, dropout_rate=dropout_rate, use_activation=True, use_batchnorm=True)
-            for i, hidden_dimension in enumerate(hidden_dimensions)
+            for i, hidden_dimension in enumerate(hidden_dimensions[:-1])
         ]
         self.blocks.append(
-            GCNNBlock(num_classes, dropout_rate=None, use_activation=False, use_batchnorm=False)
+            GCNNBlock(hidden_dimensions[-1], dropout_rate=None, use_activation=False, use_batchnorm=False)
         )
         self.softmax = keras.layers.Softmax(axis=1)
 
     def call(self, inputs):
-        x, coordinates = inputs
+        x, coordinates, mask = inputs
         A = self.adjacency_layer(coordinates)
         for layer in self.blocks:
-            x = layer([x, A])
+            x = layer([x, A, mask])
         # Average pooling of the node embeddings
+        x = apply_mask(x, mask)
         x = tf.reduce_mean(x, axis=1)
         return self.softmax(x)
 
@@ -66,10 +64,10 @@ class GCNNBlock(keras.layers.Layer):
         self.dropout_rate = dropout_rate
         self.use_activation = use_activation
         self.use_batchnorm = use_batchnorm
-        self.bias = self.add_weight('bias', shape=[1])
+        #self.bias = self.add_weight('bias', shape=[1])
 
     def build(self, input_shape):
-        self.dense = keras.layers.Dense(self.hidden_dim, input_shape=input_shape, use_bias=False)
+        self.dense = keras.layers.Dense(self.hidden_dim, input_shape=input_shape, use_bias=True)
         if self.use_batchnorm:
             self.bn = keras.layers.BatchNormalization()
         if self.use_activation:
@@ -78,16 +76,17 @@ class GCNNBlock(keras.layers.Layer):
             self.dropout = keras.layers.Dropout(rate=self.dropout_rate)
 
     def call(self, inputs):
-        inputs, A = inputs
+        inputs, A, mask = inputs
+        inputs = apply_mask(inputs, mask)
         x = tf.matmul(A, inputs)
-        x = tf.concat([x, inputs], 2)
+        x = tf.concat([x, inputs], axis=2)
         x = self.dense(x)
-        x += self.bias
+        #x += self.bias
         if self.use_batchnorm:
             x = self.bn(x)
         if self.use_activation:
             activated = self.activation(x)
-            x = tf.concat([x, activated], 2)
+            x = tf.concat([x, activated], axis=2)
         if self.dropout_rate:
             x = self.dropout(x)
         return x
@@ -131,6 +130,25 @@ class AdjacencyMatrixLayer(keras.layers.Layer):
         return A
 
 
+def apply_mask(x, mask):
+    """ Applies a row-wise mask to a tensor.
+    
+    Parameters:
+    -----------
+    x : tf.tensor, shape [N, D]
+        The tensor to mask with zeros.
+    mask : tf.tensor, shape [N]
+        A tensor that represents the masking / weighting of separate vertices.
+        
+    Returns:
+    --------
+    x_masked : tf.tensor, shape [n_batches, N, D]
+        The masked tensor, i.e. all rows of x have been multiplied by their masking value.
+    """
+    shape = x.get_shape().as_list()
+    mask = tf.reshape(mask, [-1, shape[1], 1])
+    tiled = tf.tile(mask, [1, 1, shape[2]])
+    return x * tiled
 
         
 
