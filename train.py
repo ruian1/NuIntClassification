@@ -14,11 +14,11 @@ checkpoint_callback = keras.callbacks.ModelCheckpoint(
     period = 5
 )
 
-data = dataset.TestDataset()
+data = dataset.TestDataset('../test_data/test_data_big.pkl')
 
 
 
-model = GCNN(6, [64, 64, 64])
+model = GCNN(6, [64, 128, 128, 64, 32])
 
 model.compile(optimizer='adam', 
               loss='sparse_categorical_crossentropy',
@@ -37,8 +37,8 @@ batch_size = 32
 model.fit_generator(
     data.get_batches(batch_size=batch_size, train=True), 
     steps_per_epoch = int(np.ceil(data.size(train=True) / batch_size)),
-    epochs = 5,
+    epochs = 50,
     callbacks = [checkpoint_callback, LossCalback()],
-    class_weight={0 : 1, 1 : 2}
+    class_weight={0 : 551, 1 : 449}
     )
 print(model.adjacency_layer.get_weights())
