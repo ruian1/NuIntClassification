@@ -1,13 +1,14 @@
 import tensorflow as tf
 from tensorflow import keras
 import numpy as np
+tf.enable_eager_execution()
 
 
 class GCNN(keras.Model):
     """ Model for a Graph Convolutional Network with dense graph structure. The graph is obtained using
     a Gaussian kernel on the pairwise node distances. """
 
-    def __init__(self, num_input_features, hidden_dimensions, dropout_rate=0.5, use_batchnorm=True):
+    def __init__(self, num_input_features, hidden_dimensions, dropout_rate=0.5, use_batchnorm=False):
         """ Creates a GCNN model. 
 
         Parameters:
@@ -23,30 +24,33 @@ class GCNN(keras.Model):
         """
         super().__init__()
         self.adjacency_layer = AdjacencyMatrixLayer()
-        self.blocks = [
-            GCNNBlock(hidden_dimension, dropout_rate=dropout_rate, use_activation=True, use_batchnorm=True)
-            for i, hidden_dimension in enumerate(hidden_dimensions[:-1])
-        ]
-        self.blocks.append(
-            GCNNBlock(hidden_dimensions[-1], dropout_rate=None, use_activation=False, use_batchnorm=False)
-        )
+        self.blocks = []
+        for layer_idx, hidden_dimension in enumerate(hidden_dimensions):
+            is_last_layer = layer_idx == len(hidden_dimensions) - 1
+            self.blocks.append(
+                GCNNBlock(
+                    hidden_dimension, 
+                    dropout_rate =None if is_last_layer else dropout_rate,
+                    use_activation =not is_last_layer,
+                    use_batchnorm =not is_last_layer and use_batchnorm,
+                )
+            )
         self.softmax = keras.layers.Softmax(axis=1)
 
     def call(self, inputs):
-        x, coordinates, mask = inputs
-        A = self.adjacency_layer(coordinates)
+        x, coordinates, masks = inputs
+        A = self.adjacency_layer([coordinates, masks])
         for layer in self.blocks:
-            x = layer([x, A, mask])
+            x = layer([x, A])
         # Average pooling of the node embeddings
-        x = apply_mask(x, mask)
-        x = tf.reduce_mean(x, axis=1)
+        x = tf.reduce_sum(x, axis=1)
         return self.softmax(x)
 
 
 class GCNNBlock(keras.layers.Layer):
     """ Block that implements a graph convolution. """
 
-    def __init__(self, hidden_dim, dropout_rate=None, use_activation=True, use_batchnorm=True, **kwargs):
+    def __init__(self, hidden_dim, dropout_rate=None, use_activation=True, use_batchnorm=True, input_shape=None, **kwargs):
         """ Initializes the GCNN Layer. 
         Parameters:
         -----------
@@ -76,8 +80,7 @@ class GCNNBlock(keras.layers.Layer):
             self.dropout = keras.layers.Dropout(rate=self.dropout_rate)
 
     def call(self, inputs):
-        inputs, A, mask = inputs
-        inputs = apply_mask(inputs, mask)
+        inputs, A = inputs
         x = tf.matmul(A, inputs)
         x = tf.concat([x, inputs], axis=2)
         x = self.dense(x)
@@ -98,14 +101,16 @@ class AdjacencyMatrixLayer(keras.layers.Layer):
         super().__init__(**kwargs)
 
     def build(self, input_shape):
-        self.precision_squared = self.add_weight('precision_squared', shape=[1]) # sigma^{-2}
+        self.sigma = self.add_weight('sigma', shape=[1]) #
     
-    def call(self, coordinates):
+    def call(self, inputs):
         # Create a pairwise distance matrix D, where D[i, j] = |c[i] - c[j]|_{L2}^2
         # Using the identity: D[i, j] = (c[i] - c[j])(c[i] - c[j])^T = r[i] - 2 c[i]c[j]^T + r[j]
         # where r[i] is the squared L2 norm of the i-th coordinate
-        A = tf.map_fn(self.build_adjacency_matrix_from_coordinates, coordinates)
-        return A
+        coordinates, masks = inputs
+        A = tf.map_fn(self.build_adjacency_matrix_from_coordinates, coordinates, infer_shape=False)
+        masked = A * masks
+        return masked
 
 
     def build_adjacency_matrix_from_coordinates(self, coordinates):
@@ -125,31 +130,7 @@ class AdjacencyMatrixLayer(keras.layers.Layer):
         coordinate_norms = tf.reshape(coordinate_norms, [-1, 1])
         distances = coordinate_norms - 2 * tf.matmul(coordinates, tf.transpose(coordinates)) + tf.transpose(coordinate_norms)
         # Apply a gaussian kernel and normalize using a softmax
-        A = tf.exp(-distances * self.precision_squared)
+        A = tf.exp(-distances / (self.sigma ** 2))
         A = tf.nn.softmax(A, axis=1)
         return A
 
-
-def apply_mask(x, mask):
-    """ Applies a row-wise mask to a tensor.
-    
-    Parameters:
-    -----------
-    x : tf.tensor, shape [N, D]
-        The tensor to mask with zeros.
-    mask : tf.tensor, shape [N]
-        A tensor that represents the masking / weighting of separate vertices.
-        
-    Returns:
-    --------
-    x_masked : tf.tensor, shape [n_batches, N, D]
-        The masked tensor, i.e. all rows of x have been multiplied by their masking value.
-    """
-    shape = x.get_shape().as_list()
-    mask = tf.reshape(mask, [-1, shape[1], 1])
-    tiled = tf.tile(mask, [1, 1, shape[2]])
-    return x * tiled
-
-        
-
-    
