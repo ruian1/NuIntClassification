@@ -8,60 +8,72 @@ class GCNN(keras.Model):
     """ Model for a Graph Convolutional Network with dense graph structure. The graph is obtained using
     a Gaussian kernel on the pairwise node distances. """
 
-    def __init__(self, num_input_features, hidden_dimensions, dropout_rate=0.5, use_batchnorm=False):
+    def __init__(self, num_input_features, units_graph_convolutions = [64, 64], units_fully_connected = [32, 1], 
+        dropout_rate=0.5, use_batchnorm=True):
         """ Creates a GCNN model. 
 
         Parameters:
         -----------
         num_input_features : int
             Number of features for the input. 
-        hidden_dimensions : tuple
-            Two list of ints, representing the supports of the graph filters as well as the support
-            of the fully connected layers.
+        units_graph_convolutions : list
+            The hidden units for each layer of graph convolution.
+        units_fully_connected : list
+            The hidden units for each fully connected layer.
         dropout_rate : float
             Dropout rate.
         use_batchnorm : bool
             If batch normalization should be applied.
         """
         super().__init__()
+        self.is_binary_classifier = (units_graph_convolutions + units_fully_connected)[-1] == 1
         self.adjacency_layer = AdjacencyMatrixLayer()
         self.graph_convolutions, self.fully_connecteds = [], []
-        hidden_dimensions_graph_convs, hidden_dimensions_fc = hidden_dimensions
 
-        for layer_idx, hidden_dimension in enumerate(hidden_dimensions_graph_convs):
-            is_last_layer = layer_idx == len(hidden_dimensions_graph_convs) - 1
+        # Add graph convolution blocks
+        for layer_idx, hidden_dimension in enumerate(units_graph_convolutions):
+            is_last_layer = layer_idx == len(units_graph_convolutions) - 1
             self.graph_convolutions.append(
                 GCNNBlock(
                     hidden_dimension, 
                     dropout_rate = None if is_last_layer else dropout_rate,
                     use_activation = not is_last_layer,
-                    use_batchnorm = False # not is_last_layer and use_batchnorm, TODO: implement padded batchnorm
+                    use_batchnorm = not is_last_layer and use_batchnorm # TODO: implement padded batchnorm
                 )
             )
-        for layer_idx, hidden_dimension in enumerate(hidden_dimensions_fc):
-            is_last_layer = layer_idx == len(hidden_dimensions_fc) - 1
+        
+        # Add fully connected blocks
+        for layer_idx, hidden_dimension in enumerate(units_fully_connected):
+            is_last_layer = layer_idx == len(units_fully_connected) - 1
             self.fully_connecteds.append(
-                keras.layers.Dense(hidden_dimension, activation='relu', use_bias=True)
+                keras.layers.Dense(hidden_dimension, activation=None, use_bias=True)
             )
+            if not is_last_layer:
+                self.fully_connecteds.append(keras.layers.BatchNormalization())
+            if not is_last_layer:
+                self.fully_connecteds.append(keras.layers.ReLU())
             if not is_last_layer:
                 self.fully_connecteds.append(
                     keras.layers.Dropout(dropout_rate)
                 )
-
-        self.softmax = keras.layers.Softmax(axis=1)
 
     def call(self, inputs):
         # Graph convolutions
         x, coordinates, masks = inputs
         A = self.adjacency_layer([coordinates, masks])
         for layer in self.graph_convolutions:
-            x = layer([x, A])
+            x = layer([x, A, masks])
         # Average pooling of the node embeddings
-        x = tf.reduce_mean(x, axis=1)
+        x = padded_vertex_mean(x, masks)
         # Fully connected layers
         for layer in self.fully_connecteds:
             x = layer(x)
-        return self.softmax(x)
+        # Output activation
+        if self.is_binary_classifier:
+            x = keras.activations.sigmoid(x)
+        else:
+            x = keras.activations.softmax(x)
+        return x
 
 
 class GCNNBlock(keras.layers.Layer):
@@ -90,20 +102,20 @@ class GCNNBlock(keras.layers.Layer):
     def build(self, input_shape):
         self.dense = keras.layers.Dense(self.hidden_dim, input_shape=input_shape, use_bias=True)
         if self.use_batchnorm:
-            self.bn = keras.layers.BatchNormalization()
+            self.bn = FeatureNormalization()
         if self.use_activation:
             self.activation = keras.layers.ReLU()
         if self.dropout_rate:
             self.dropout = keras.layers.Dropout(rate=self.dropout_rate)
 
     def call(self, inputs):
-        inputs, A = inputs
+        inputs, A, masks = inputs
         x = tf.matmul(A, inputs)
         x = tf.concat([x, inputs], axis=2)
         x = self.dense(x)
         #x += self.bias
         if self.use_batchnorm:
-            x = self.bn(x)
+            x = self.bn([x, masks])
         if self.use_activation:
             activated = self.activation(x)
             x = tf.concat([x, activated], axis=2)
@@ -127,7 +139,7 @@ class AdjacencyMatrixLayer(keras.layers.Layer):
         coordinates, masks = inputs
         A = tf.map_fn(self.build_adjacency_matrix_from_coordinates, coordinates, infer_shape=False)
         masked = A * masks
-        return masked
+        return A
 
 
     def build_adjacency_matrix_from_coordinates(self, coordinates):
@@ -135,12 +147,12 @@ class AdjacencyMatrixLayer(keras.layers.Layer):
         
         Parameters:
         -----------
-        coordiantes : tf.tensor, shape [K, 3]
-            The coordinates that will be used to construct the dense graph.
+        coordinates : tf.tensor, shape [num_samples, num_vertices, 3]
+            The coordinates for the vertices in each graph.
         
         Returns:
         --------
-        A : tf.tensor, shape [K, K]
+        A : tf.tensor, shape [num_vertices, num_vertices]
             The adjacency matrix.
         """
         coordinate_norms = tf.reduce_sum(coordinates * coordinates, 1)
@@ -151,3 +163,58 @@ class AdjacencyMatrixLayer(keras.layers.Layer):
         A = tf.nn.softmax(A, axis=1)
         return A
 
+
+
+
+class FeatureNormalization(keras.layers.Layer):
+    """ Layer that applies feature normalization accounting for padded zeros. """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def build(self, input_shape):
+        # TODO: add gamma and mu parameters for learnable centering and scaling
+        shape_X, _ = input_shape
+        self.beta = self.add_weight('beta', shape=[1, 1, shape_X.as_list()[2]])
+        self.gamma = self.add_weight('gamma', shape=[1, 1, shape_X.as_list()[2]])
+
+    def call(self, inputs):
+        X, masks = inputs # X is of shape [num_samples, num_vertices, num_features]
+        X_mean = tf.expand_dims(padded_vertex_mean(X, masks), 1)
+        X_centered = X - X_mean
+        X_var = padded_vertex_mean(X_centered ** 2, masks)
+        X_normalized = X_centered / tf.expand_dims(tf.sqrt(X_var) + 1e-20, 1)
+        return self.gamma * X_normalized + self.beta
+
+
+def padded_vertex_mean(X, masks):
+    """ Calculates the mean over all vertices and consideres padded vertices. 
+    
+    Parameters:
+    -----------
+    X : tf.tensor, shape [num_batches, num_vertices, D]
+        The tensor to calculate the mean over all vertices (axis 1).
+    masks : tf.tensor, shape [num_batches, num_vertices, num_vertices]
+        Masks for adjacency matrix of the graphs.
+
+    Returns:
+    --------
+    X_mean : tf.tensor, shape [num_batches, D]
+        Mean over all non-padded vertices.
+    """
+    vertex_masks = tf.reduce_max(masks, axis=[-1]) # Masking each vertex individually 
+    num_vertices = tf.reduce_sum(vertex_masks, axis=1) # Number of vertices per sample
+    X_mean = tf.reduce_sum(X, axis=1)
+    X_mean /= tf.reshape(num_vertices, (-1, 1)) + 1e-20
+    return X_mean
+    
+    
+
+
+
+
+
+
+
+
+    

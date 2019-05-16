@@ -22,7 +22,7 @@ class TestDataset(object):
             has_track = interaction_type == b'numu'
             self.features += data[interaction_type][b'features']
             self.coordinates += data[interaction_type][b'coordinates']
-            self.targets += [int(has_track)] * len(data[interaction_type][b'features'])
+            self.targets += [np.float32(has_track)] * len(data[interaction_type][b'features'])
         self.features = np.array(self.features)
         self.coordinates = np.array(self.coordinates)
         self.targets = np.array(self.targets)
