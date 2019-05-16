@@ -18,7 +18,7 @@ data = dataset.TestDataset('../test_data/test_data_big.pkl')
 
 
 
-model = GCNN(6, [64, 128, 128, 64, 32])
+model = GCNN(6, ([64, 64, 64], [32, 16, 2]))
 
 model.compile(optimizer='adam', 
               loss='sparse_categorical_crossentropy',
@@ -33,11 +33,11 @@ class LossCalback(tf.keras.callbacks.Callback):
             data.get_batches(batch_size=batch_size, train=False),
             steps=data.size(train=False) // batch_size))
 
-batch_size = 32
+batch_size = 64
 model.fit_generator(
     data.get_batches(batch_size=batch_size, train=True), 
     steps_per_epoch = int(np.ceil(data.size(train=True) / batch_size)),
-    epochs = 50,
+    epochs = 100,
     callbacks = [checkpoint_callback, LossCalback()],
     class_weight={0 : 551, 1 : 449}
     )

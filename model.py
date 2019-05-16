@@ -15,8 +15,9 @@ class GCNN(keras.Model):
         -----------
         num_input_features : int
             Number of features for the input. 
-        hidden_dimensions : list
-            A list of ints, representing the hidden dimensionalities of the filter weights.
+        hidden_dimensions : tuple
+            Two list of ints, representing the supports of the graph filters as well as the support
+            of the fully connected layers.
         dropout_rate : float
             Dropout rate.
         use_batchnorm : bool
@@ -24,26 +25,42 @@ class GCNN(keras.Model):
         """
         super().__init__()
         self.adjacency_layer = AdjacencyMatrixLayer()
-        self.blocks = []
-        for layer_idx, hidden_dimension in enumerate(hidden_dimensions):
-            is_last_layer = layer_idx == len(hidden_dimensions) - 1
-            self.blocks.append(
+        self.graph_convolutions, self.fully_connecteds = [], []
+        hidden_dimensions_graph_convs, hidden_dimensions_fc = hidden_dimensions
+
+        for layer_idx, hidden_dimension in enumerate(hidden_dimensions_graph_convs):
+            is_last_layer = layer_idx == len(hidden_dimensions_graph_convs) - 1
+            self.graph_convolutions.append(
                 GCNNBlock(
                     hidden_dimension, 
-                    dropout_rate =None if is_last_layer else dropout_rate,
-                    use_activation =not is_last_layer,
-                    use_batchnorm =not is_last_layer and use_batchnorm,
+                    dropout_rate = None if is_last_layer else dropout_rate,
+                    use_activation = not is_last_layer,
+                    use_batchnorm = False # not is_last_layer and use_batchnorm, TODO: implement padded batchnorm
                 )
             )
+        for layer_idx, hidden_dimension in enumerate(hidden_dimensions_fc):
+            is_last_layer = layer_idx == len(hidden_dimensions_fc) - 1
+            self.fully_connecteds.append(
+                keras.layers.Dense(hidden_dimension, activation='relu', use_bias=True)
+            )
+            if not is_last_layer:
+                self.fully_connecteds.append(
+                    keras.layers.Dropout(dropout_rate)
+                )
+
         self.softmax = keras.layers.Softmax(axis=1)
 
     def call(self, inputs):
+        # Graph convolutions
         x, coordinates, masks = inputs
         A = self.adjacency_layer([coordinates, masks])
-        for layer in self.blocks:
+        for layer in self.graph_convolutions:
             x = layer([x, A])
         # Average pooling of the node embeddings
-        x = tf.reduce_sum(x, axis=1)
+        x = tf.reduce_mean(x, axis=1)
+        # Fully connected layers
+        for layer in self.fully_connecteds:
+            x = layer(x)
         return self.softmax(x)
 
 
