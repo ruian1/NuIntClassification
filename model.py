@@ -64,7 +64,8 @@ class GCNN(keras.Model):
         for layer in self.graph_convolutions:
             x = layer([x, A, masks])
         # Average pooling of the node embeddings
-        x = padded_vertex_mean(x, masks)
+        # x = padded_vertex_mean(x, masks)
+        x = tf.reduce_sum(x, axis=1)
         # Fully connected layers
         for layer in self.fully_connecteds:
             x = layer(x)
@@ -137,33 +138,13 @@ class AdjacencyMatrixLayer(keras.layers.Layer):
         # Using the identity: D[i, j] = (c[i] - c[j])(c[i] - c[j])^T = r[i] - 2 c[i]c[j]^T + r[j]
         # where r[i] is the squared L2 norm of the i-th coordinate
         coordinates, masks = inputs
-        A = tf.map_fn(self.build_adjacency_matrix_from_coordinates, coordinates, infer_shape=False)
-        masked = A * masks
-        return A
-
-
-    def build_adjacency_matrix_from_coordinates(self, coordinates):
-        """ Creates the adjacency matrix of a graph based on a set of coordinates.
-        
-        Parameters:
-        -----------
-        coordinates : tf.tensor, shape [num_samples, num_vertices, 3]
-            The coordinates for the vertices in each graph.
-        
-        Returns:
-        --------
-        A : tf.tensor, shape [num_vertices, num_vertices]
-            The adjacency matrix.
-        """
-        coordinate_norms = tf.reduce_sum(coordinates * coordinates, 1)
-        coordinate_norms = tf.reshape(coordinate_norms, [-1, 1])
-        distances = coordinate_norms - 2 * tf.matmul(coordinates, tf.transpose(coordinates)) + tf.transpose(coordinate_norms)
+        coordinate_norms = tf.reduce_sum(coordinates ** 2, 2)
+        coordinate_norms = tf.expand_dims(coordinate_norms, 2)
+        distances = coordinate_norms - 2 * tf.matmul(coordinates, tf.transpose(coordinates, perm=[0, 2, 1])) + tf.transpose(coordinate_norms, perm=[0, 2, 1])
         # Apply a gaussian kernel and normalize using a softmax
         A = tf.exp(-distances / (self.sigma ** 2))
-        A = tf.nn.softmax(A, axis=1)
-        return A
-
-
+        return tf.nn.softmax(A, axis=2)
+        return padded_softmax(A, masks)
 
 
 class FeatureNormalization(keras.layers.Layer):
@@ -208,13 +189,26 @@ def padded_vertex_mean(X, masks):
     X_mean /= tf.reshape(num_vertices, (-1, 1)) + 1e-20
     return X_mean
     
+def padded_softmax(A, masks):
+    """ Calculates the softmax along axis 2 considering padded vertices. 
     
+    Parameters:
+    -----------
+    A : tf.tensor, shape [num_samples, num_vertices, num_vertices]
+        The adjacency matrices.
+    masks : tf.tensor, shape [num_samples, num_vertices, num_vertices]
+        The masks for the adjacency matrices.
 
-
-
-
-
-
+    Returns:
+    --------
+    A : tf.tensor, shape [num_samples, num_vertices, num_vertices]  
+        The masked adjacency matrices normalized using a softmax while considering padded vertices.
+    """
+    A = tf.nn.softmax(A, axis=2)
+    return A
+    A *= masks
+    normalization = tf.reduce_sum(A, axis=2, keepdims=True) + 1e-20
+    return A / normalization
 
 
     
