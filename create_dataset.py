@@ -125,6 +125,13 @@ def process_frame(frame):
     frame['VertexZ'] = dataclasses.I3VectorFloat(coordinates[:, 2])
     return True
 
+current_run_id = None
+def print_run_id(frame):
+    run_id = frame['I3EventHeader'].run_id
+    if current_run_id != run_id:
+        current_run_id = run_id
+        print('Starting new frame with id', current_run_id)
+
 def create_dataset(outfile, infiles):
     """
     Creates a dataset in hdf5 format.
@@ -142,6 +149,7 @@ def create_dataset(outfile, infiles):
     tray.AddModule('I3Reader',
                 FilenameList = infiles)
     tray.AddModule(process_frame, 'process_frame')
+    tray.AddModule(print_run_id, 'print_run_id')
     tray.AddModule(I3TableWriter, 'I3TableWriter', keys=['NumberVertices', 'CumulativeCharge', 'Time', 'FirstCharge', 'VertexX', 'VertexY', 'VertexZ'], 
                 TableService=I3HDFTableService(outfile),
                 SubEventStreams=['InIceSplit'],
