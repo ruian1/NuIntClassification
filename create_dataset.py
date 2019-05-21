@@ -127,6 +127,7 @@ def process_frame(frame):
 
 current_run_id = None
 def print_run_id(frame):
+    global current_run_id
     run_id = frame['I3EventHeader'].run_id
     if current_run_id != run_id:
         current_run_id = run_id
