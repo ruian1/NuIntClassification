@@ -19,10 +19,10 @@ checkpoint_callback = keras.callbacks.ModelCheckpoint(
 #data = dataset.TestDataset('../test_data/test_data_big.pkl')
 #data = dataset.TestDataset()
 data = dataset.TestDataset(sys.argv[1])
+hidden_dimensions_graph_convolutions, hidden_dimensions_fully_connected = eval(sys.argv[2])
 
-
-hidden_dimensions_graph_convolutions = [64, 64, 64]
-hidden_dimensions_fully_connected = [32, 16, 1]
+#hidden_dimensions_graph_convolutions = [64, 64, 64]
+#hidden_dimensions_fully_connected = [32, 16, 1]
 model = GCNN(6, units_graph_convolutions = hidden_dimensions_graph_convolutions, 
     units_fully_connected = hidden_dimensions_fully_connected, dropout_rate=0.2, use_batchnorm=False)
 optimizer = tf.keras.optimizers.Adam()
