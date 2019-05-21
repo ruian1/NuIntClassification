@@ -1,2 +1,4 @@
 training/*
 __pycache__
+log
+training
