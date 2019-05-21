@@ -3,7 +3,6 @@ import pickle
 
 test_data = '../test_data/test_data.pkl'
 
-
 class TestDataset(object):
     """ Dataset mock from a single pickle for testing the model. """
 

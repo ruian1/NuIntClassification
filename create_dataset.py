@@ -114,8 +114,8 @@ def process_frame(frame):
     frame : ?
         The frame to process.
     """
-    frame = frame['InIcePulses'].apply(frame)
-    features, coordinates, _ = get_normalized_data_from_frame(frame)
+    pulses = frame['InIcePulses'].apply(frame)
+    features, coordinates, _ = get_normalized_data_from_frame(pulses)
     frame['NumberVertices'] = dataclasses.I3Double(features.shape[0])
     frame['CumulativeCharge'] = dataclasses.I3VectorFloat(features[:, 0])
     frame['Time'] = dataclasses.I3VectorFloat(features[:, 1])
@@ -137,7 +137,7 @@ def create_dataset(outfile, infiles):
         A list of intput i3 files.
     """
     # TODO process all files
-    infiles = infiles[:2]
+    infiles = infiles
     tray = I3Tray()
     tray.AddModule('I3Reader',
                 FilenameList = infiles)
@@ -148,7 +148,7 @@ def create_dataset(outfile, infiles):
                 BookEverything=False
                 )
     # TODO process all not only 10 frames
-    tray.Execute(10)
+    tray.Execute()
     tray.Finish()
 
 if __name__ == '__main__':
