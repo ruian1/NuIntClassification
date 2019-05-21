@@ -22,10 +22,10 @@ data = dataset.TestDataset(sys.argv[1])
 
 
 hidden_dimensions_graph_convolutions = [64, 64, 64]
-hidden_dimensions_fully_connected = [32, 1]
+hidden_dimensions_fully_connected = [32, 16, 1]
 model = GCNN(6, units_graph_convolutions = hidden_dimensions_graph_convolutions, 
     units_fully_connected = hidden_dimensions_fully_connected, dropout_rate=0.2, use_batchnorm=False)
-optimizer = tf.keras.optimizers.Adam(lr=1e-3)
+optimizer = tf.keras.optimizers.Adam()
 
 if hidden_dimensions_fully_connected[-1] == 1:
     loss = 'binary_crossentropy'
@@ -49,8 +49,8 @@ batch_size = 128
 model.fit_generator(
     data.get_batches(batch_size=batch_size, train=True), 
     steps_per_epoch = int(np.ceil(data.size(train=True) / batch_size)),
-    epochs = 250,
+    epochs = 200,
     callbacks = [checkpoint_callback, LossCalback()],
-    #class_weight={0 : 551, 1 : 449}
+    class_weight={0 : 551, 1 : 449}
     )
 print(model.adjacency_layer.get_weights())
