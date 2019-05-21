@@ -4,6 +4,7 @@ import os.path
 from model import GCNN
 import dataset
 import numpy as np
+import sys
 tf.enable_eager_execution()
 
 checkpoint_path = 'training/cp-{epoch:04d}.ckpt'
@@ -15,10 +16,12 @@ checkpoint_callback = keras.callbacks.ModelCheckpoint(
 )
 
 #data = dataset.TestDataset('../test_data/data_centered.pkl')
-data = dataset.TestDataset()
+#data = dataset.TestDataset('../test_data/test_data_big.pkl')
+#data = dataset.TestDataset()
+data = dataset.TestDataset(sys.argv[1])
 
 
-hidden_dimensions_graph_convolutions = [64, 64]
+hidden_dimensions_graph_convolutions = [64, 64, 64]
 hidden_dimensions_fully_connected = [32, 1]
 model = GCNN(6, units_graph_convolutions = hidden_dimensions_graph_convolutions, 
     units_fully_connected = hidden_dimensions_fully_connected, dropout_rate=0.2, use_batchnorm=False)
