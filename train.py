@@ -45,12 +45,16 @@ class LossCalback(tf.keras.callbacks.Callback):
             data.get_batches(batch_size=batch_size, train=False),
             steps=data.size(train=False) // batch_size))
 
+class_prior = data.get_class_prior()
+print('Class prior: ', class_prior)
+
 batch_size = 128
 model.fit_generator(
     data.get_batches(batch_size=batch_size, train=True), 
     steps_per_epoch = int(np.ceil(data.size(train=True) / batch_size)),
     epochs = 200,
     callbacks = [checkpoint_callback, LossCalback()],
-    class_weight={0 : 551, 1 : 449}
+    class_weight = class_prior
     )
-print(model.adjacency_layer.get_weights())
+
+#print(model.adjacency_layer.get_weights())

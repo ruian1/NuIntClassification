@@ -1,23 +1,31 @@
 import numpy as np
 import pickle
+import tables
 
 test_data = '../test_data/test_data.pkl'
 
 class TestDataset(object):
     """ Dataset mock from a single pickle for testing the model. """
 
-    def __init__(self, pickle_path = '../test_data/test_data.pkl', validation_portion=0.2, shuffle=True):
+    def __init__(self, pickle_path = '../test_data/test_data.pkl', validation_portion=0.2, shuffle=True, 
+        interaction_types = (b'numu', b'nue', b'nutau')):
         """ Initializes the test data.
         
         Parameters:
         -----------
         pickle_path : str
             Path to the pickle file containing all three interaction types.
+        validation_portion : float
+            The fraction of the dataset to be used for validation during training.
+        shuffle : bool
+            If True, the indices will be shuffled randomly.
+        interaction_types : iterable
+            All interaction types to be considered.
         """
         with open(pickle_path, 'rb') as f:
             data = pickle.load(f, encoding='bytes')
         self.features, self.coordinates, self.targets = [], [], []
-        for class_label, interaction_type in enumerate((b'numu', b'nue', b'nutau')):
+        for class_label, interaction_type in enumerate(interaction_types):
             has_track = interaction_type == b'numu'
             self.features += data[interaction_type][b'features']
             self.coordinates += data[interaction_type][b'coordinates']
@@ -31,6 +39,20 @@ class TestDataset(object):
             np.random.shuffle(idx)
         self.idx_train = idx[:validation_start]
         self.idx_validation = idx[validation_start:]
+
+    def get_class_prior(self):
+        """ Returns the class prior, i.e. the number of samples per class for the dataset. 
+        
+        Returns:
+        --------
+        class_prior : dict
+            A dict mapping from class label to float fractions.
+        """
+        labels, counts = np.unique(self.targets[self.idx_train], return_counts=True)
+        class_prior = {}
+        for label, count in zip(labels, counts):
+            class_prior[label] = count / self.idx_train.shape[0]
+        return class_prior
 
     def size(self, train=True):
         return len(self.idx_train) if train else len(self.idx_validation)
@@ -97,4 +119,31 @@ class TestDataset(object):
             masks[idx, :f.shape[0], :f.shape[0]] = 1
         return features_padded, coordinates_padded, masks
 
+
+class HDF5Dataset(object):
+    """ Class to iterate over an HDF5 Dataset. """
+
+    def __init__(self, files, validation_portion=0.1, test_portion=0.1, shuffle=True):
+        """ Initlaizes the dataset wrapper from multiple hdf5 files, each corresponding to exactly one class label.
+        
+        Parameters:
+        -----------
+        files : dict
+            A dict that maps class labels (integers) to lists of hdf5 file paths.
+        validation_portion : float
+            The fraction of the dataset that is kept from the model during training for validation.
+        test_portion = 0.1
+            The fraction of the dataset that is kept form the model during training and only evaulated after training has finished.
+        shuffle : bool
+            If True, the data will be shuffled randomly.
+        """
+        self.files = {
+            label : [tables.open_file(filepath) for filepath in files[label]] for label in files
+        }
+        # Count the total number of samples in all files
+        number_samples = 0
+        for label in self.files:
+            for file in self.files[label]:
+                number_samples += len(table_file.root.VertexOffsets.cols.item)
+        self.idx = np.arange(self.number_samples)
 
