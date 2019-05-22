@@ -12,7 +12,7 @@ import pickle
 with open('/project/6008051/fuchsgru/NuIntClassification/dom_positions.pkl', 'rb') as f:
     dom_positions = pickle.load(f)
 
-def normalize_coordinates(coordinates, weights=None, scale=True, copy=False, epsilon=1e-20):
+def normalize_coordinates(coordinates, weights=None, scale=True, copy=False):
     """ Normalizes the coordinates matrix by centering it using weighs (like charge).
     
     Parameters:
@@ -25,51 +25,73 @@ def normalize_coordinates(coordinates, weights=None, scale=True, copy=False, eps
         If true, the coordinates will all be scaled to have empircal variance of 1.
     copy : bool
         If true, the coordinate matrix will be copied and not overwritten.
-    epslion : float
-        Additive value when dividing by the standard deviation.
         
     Returns:
     --------
     coordinates : ndarray, shape [N, 3]
-        The normalized coordinate matrix with zero mean and unit variance considering weights.
+        The normalized coordinate matrix.
+    mean : ndarray, shape [3]
+        The means along all axis
+    std : ndarray, shape [3]
+        The standard deviations along all axis
     """
     if copy:
         coordinates = coordinates.copy()
     mean = np.average(coordinates, axis=0, weights=weights).reshape((1, -1))
     coordinates -= mean
     if scale:
-        coordinates /= np.sqrt(np.average(coordinates ** 2, axis=0, weights=weights)) + 1e-20
-    return coordinates
-
-def get_events_from_frame(frame):
+        std = np.sqrt(np.average(coordinates ** 2, axis=0, weights=weights)) + 1e-20
+        coordinates /= std
+    return coordinates, mean, std
+    
+def get_events_from_frame(frame, charge_threshold=0.5):
     """ Extracts data (charge and time of first arrival) as well as their positions from a frame.
     
     Parameters:
     -----------
     frame : ?
-        The physics frame to extract data from, which is expected to be "applied". 
-        I.e. frame = frame['InIcePulses'].apply(frame) should be done before calling this method.
+        The physics frame to extract data from.
+    charge_threshold : float
+        The threshold for a charge to be considered a valid pulse for the time of the first pulse arrival.
     
     Returns:
     --------
-    dom_features : ndarray, shape [N, 2]
+    dom_features : ndarray, shape [N, 8]
         Feature matrix for the doms that were active during this event.
     dom_positions : ndarray, shape [N, 3]
         Coordinate matrix for the doms that were active during this event.
     omkeys : ndarray, shape [N, 3]
         Omkeys for the doms that were active during this event.
+    baselines : ndarray, shape [N]
+        LLH values that are thresholded in order to get a classification baseline.
     """
-    doms, vertices, omkeys = [], [], []
-    for omkey, pulses in frame:
-        cumulative_charge, tmin = 0, np.inf
+    track_reco = frame['IC86_Dunkman_L6_PegLeg_MultiNest8D_Track']
+    x = frame['InIcePulses']
+    hits = x.apply(frame)
+    
+    doms, vertices, omkeys, baselines = [], [], [], []
+    for omkey, pulses in hits:
+        cumulative_charge, tmin, first_charge = 0, np.inf, None
         dom_position = dom_positions[omkey]
         for pulse in pulses:
             cumulative_charge += pulse.charge
-            tmin = min(tmin, pulse.time)
-        doms.append([cumulative_charge, tmin, pulses[0].charge])
+            if pulse.charge >= charge_threshold:
+                tmin = min(tmin, pulse.time)
+                if first_charge is None:
+                    first_charge = pulse.charge
+        # Features:
+        # Cumulative Charge per DOM, Time of first charge above threshold, First charge above threshold,
+        # Reconstruction x, Reconstruction y, Reconstrucion z, Reconstruction azimuth, Reconstruction zenith
+        doms.append([
+            cumulative_charge, tmin, pulses[0].charge, track_reco.pos.x, track_reco.pos.y, 
+            track_reco.pos.z, track_reco.dir.azimuth, track_reco.dir.zenith
+        ])
         vertices.append([dom_position[axis] for axis in ('x', 'y', 'z')])
         omkeys.append(omkey)
-    return np.array(doms), np.array(vertices), np.array(omkeys)
+        delta_llh = frame['IC86_Dunkman_L6']['delta_LLH'] # Used for a baseline classifcation
+        baselines.append(delta_llh)
+        
+    return np.array(doms), np.array(vertices), np.array(omkeys), np.array(baselines)
 
 def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-4, append_coordinates_to_features=True):
     """ Creates normalized features from a frame.
@@ -84,27 +106,30 @@ def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-4, app
         The normalization constant for time.
     append_coordinates_to_features : bool
         If the normalized coordinates should be appended to the feature matrix.
-    
+        
     Returns:
     --------
-    dom_features : ndarray, shape [N, D]
-        Feature matrix for the doms that were active during this event. 
-        The columns are (cumulativecharge, time of first pulse, charge of first pulse[, x, y, z])
+    dom_features : ndarray, shape [N, 6]
+        Feature matrix for the doms that were active during this event.
     dom_positions : ndarray, shape [N, 3]
         Coordinate matrix for the doms that were active during this event. All values are in range [0, 1]
     omkeys : ndarray, shape [N, 3]
         Omkeys for the doms that were active during this event.
     """
     
-    features, coordinates, omkeys = get_events_from_frame(frame)
-    coordinates = normalize_coordinates(coordinates, features[:, 0])
+    features, coordinates, omkeys, baselines = get_events_from_frame(frame)
+    coordinates, coordinate_mean, coordinate_std = normalize_coordinates(coordinates, features[:, 0])
     features[:, 0] *= charge_scale
     features[:, 2] *= charge_scale
     features[:, 1] -= features[:, 1].min()
     features[:, 1] *= time_scale
+    # Scale the origin of the track reconstruction to share the same coordinate system
+    features[:, 3:6] -= coordinate_mean
+    features[:, 3:6] /= coordinate_std
+    
     if append_coordinates_to_features:
         features = np.hstack((features, coordinates))
-    return features, coordinates, omkeys
+    return features, coordinates, omkeys, baselines
 
 def process_frame(frame):
     """ Callback for processing a frame and adding relevant data to the hdf5 file. 
@@ -115,7 +140,7 @@ def process_frame(frame):
         The frame to process.
     """
     pulses = frame['InIcePulses'].apply(frame)
-    features, coordinates, _ = get_normalized_data_from_frame(pulses)
+    features, coordinates, _, baselines = get_normalized_data_from_frame(pulses)
     frame['NumberVertices'] = dataclasses.I3Double(features.shape[0])
     frame['CumulativeCharge'] = dataclasses.I3VectorFloat(features[:, 0])
     frame['Time'] = dataclasses.I3VectorFloat(features[:, 1])
@@ -123,6 +148,12 @@ def process_frame(frame):
     frame['VertexX'] = dataclasses.I3VectorFloat(coordinates[:, 0])
     frame['VertexY'] = dataclasses.I3VectorFloat(coordinates[:, 1])
     frame['VertexZ'] = dataclasses.I3VectorFloat(coordinates[:, 2])
+    frame['RecoX'] = dataclasses.I3VectorFloat(coordinates[:, 3])
+    frame['RecoY'] = dataclasses.I3VectorFloat(coordinates[:, 4])
+    frame['RecoZ'] = dataclasses.I3VectorFloat(coordinates[:, 5])
+    frame['RecoAzimuth'] = dataclasses.I3VectorFloat(coordinates[:, 6])
+    frame['RecoZenith'] = dataclasses.I3VectorFloat(coordinates[:, 7])
+    frame['DeltaLLH'] = dataclasses.I3VectorFloat(baselines)
     return True
 
 def create_dataset(outfile, infiles):
