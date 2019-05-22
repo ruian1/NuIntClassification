@@ -9,7 +9,7 @@ import numpy as np
 import pickle
 
 # Parses i3 files in order to create a (huge) hdf5 file that contains all events of all files
-with open('dom_positions.pkl', 'rb') as f:
+with open('/project/6008051/fuchsgru/NuIntClassification/dom_positions.pkl', 'rb') as f:
     dom_positions = pickle.load(f)
 
 def normalize_coordinates(coordinates, weights=None, scale=True, copy=False, epsilon=1e-20):
@@ -152,6 +152,6 @@ def create_dataset(outfile, infiles):
 if __name__ == '__main__':
     for interaction_type in ('nue', 'numu', 'nutau'):
         print('##### Creating dataset for interaciton type', interaction_type)
-        outfile = '/project/rpp-kenclark/fuchsgru/data_dragon_3y_{0}.hd5'.format(interaction_type)
+        outfile = '/project/6008051/fuchsgru/NuIntClassification/data_dragon_3y_{0}.hd5'.format(interaction_type)
         paths = glob('/project/6008051/hignight/dragon_3y/{0}/*'.format(interaction_type))
         create_dataset(outfile, paths)

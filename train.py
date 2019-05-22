@@ -24,7 +24,7 @@ hidden_dimensions_graph_convolutions, hidden_dimensions_fully_connected = eval(s
 #hidden_dimensions_graph_convolutions = [64, 64, 64]
 #hidden_dimensions_fully_connected = [32, 16, 1]
 model = GCNN(6, units_graph_convolutions = hidden_dimensions_graph_convolutions, 
-    units_fully_connected = hidden_dimensions_fully_connected, dropout_rate=0.2, use_batchnorm=True)
+    units_fully_connected = hidden_dimensions_fully_connected, dropout_rate=0.2, use_batchnorm=False)
 optimizer = tf.keras.optimizers.Adam()
 
 if hidden_dimensions_fully_connected[-1] == 1:
@@ -56,5 +56,3 @@ model.fit_generator(
     callbacks = [checkpoint_callback, LossCalback()],
     class_weight = class_prior
     )
-
-#print(model.adjacency_layer.get_weights())
