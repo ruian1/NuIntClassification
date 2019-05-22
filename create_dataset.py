@@ -109,7 +109,7 @@ def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-4, app
         
     Returns:
     --------
-    dom_features : ndarray, shape [N, 6]
+    dom_features : ndarray, shape [N, 11]
         Feature matrix for the doms that were active during this event.
     dom_positions : ndarray, shape [N, 3]
         Coordinate matrix for the doms that were active during this event. All values are in range [0, 1]
@@ -147,11 +147,11 @@ def process_frame(frame):
     frame['VertexX'] = dataclasses.I3VectorFloat(coordinates[:, 0])
     frame['VertexY'] = dataclasses.I3VectorFloat(coordinates[:, 1])
     frame['VertexZ'] = dataclasses.I3VectorFloat(coordinates[:, 2])
-    frame['RecoX'] = dataclasses.I3VectorFloat(coordinates[:, 3])
-    frame['RecoY'] = dataclasses.I3VectorFloat(coordinates[:, 4])
-    frame['RecoZ'] = dataclasses.I3VectorFloat(coordinates[:, 5])
-    frame['RecoAzimuth'] = dataclasses.I3VectorFloat(coordinates[:, 6])
-    frame['RecoZenith'] = dataclasses.I3VectorFloat(coordinates[:, 7])
+    frame['RecoX'] = dataclasses.I3VectorFloat(features[:, 3])
+    frame['RecoY'] = dataclasses.I3VectorFloat(features[:, 4])
+    frame['RecoZ'] = dataclasses.I3VectorFloat(features[:, 5])
+    frame['RecoAzimuth'] = dataclasses.I3VectorFloat(features[:, 6])
+    frame['RecoZenith'] = dataclasses.I3VectorFloat(features[:, 7])
     frame['DeltaLLH'] = dataclasses.I3VectorFloat(baselines)
     return True
 
