@@ -2,3 +2,4 @@ training/*
 __pycache__
 training
 log
+*.hd5
