@@ -3,7 +3,6 @@ from tensorflow import keras
 import numpy as np
 tf.enable_eager_execution()
 
-
 class GCNN(keras.Model):
     """ Model for a Graph Convolutional Network with dense graph structure. The graph is obtained using
     a Gaussian kernel on the pairwise node distances. """

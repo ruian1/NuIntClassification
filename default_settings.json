@@ -1,0 +1,27 @@
+{
+    "dataset" : {
+        "type" : "pickle",
+        "path" : "../test_data/data_centered_reco.pkl",
+        "validation_portion" : 0.1,
+        "test_portion" : 0.1,
+        "shuffle" : true
+    },
+    "model" : {
+        "type" : "gcnn",
+        "hidden_units_graph_convolutions" : [64, 64, 64],
+        "hidden_units_fully_connected" : [32, 16, 1],
+        "use_batchnorm" : false,
+        "dropout_rate" : 0.2
+    },
+    "training" : {
+        "metrics" : [
+            "accuracy"
+        ],
+        "learning_rate" : 1e-3,
+        "batch_size" : 128,
+        "epochs" : 25,
+        "checkpoint_directory" : "./training/",
+        "checkpoint_period" : 5,
+        "use_class_prior" : true
+    }
+}

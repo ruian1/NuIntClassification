@@ -1,7 +1,7 @@
 from .hd5 import *
-from .test import *
+from .pkl import *
 
 __all__ = [
-    'TestDataset',
+    'PickleDataset',
     'HD5Dataset',
 ]

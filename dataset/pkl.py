@@ -2,30 +2,30 @@ import numpy as np
 import pickle
 import tables
 
-__all__ = ['TestDataset',]
-
 #test_data = '../test_data/test_data.pkl'
 test_data = '../test_data/data_centered_reco.pkl'
 
-class TestDataset(object):
-    """ Dataset mock from a single pickle for testing the model. """
+class PickleDataset(object):
+    """ Dataset from a single pickle. """
 
-    def __init__(self, pickle_path = test_data, validation_portion=0.2, shuffle=True, 
+    def __init__(self, path = test_data, validation_portion=0.1, test_portion=0.1, shuffle=True, 
         interaction_types = (b'numu', b'nue', b'nutau')):
         """ Initializes the test data.
         
         Parameters:
         -----------
-        pickle_path : str
+        path : str
             Path to the pickle file containing all three interaction types.
         validation_portion : float
             The fraction of the dataset to be used for validation during training.
+        test_portion : float
+            The fraction of the dataset to be used for testing only after training.
         shuffle : bool
             If True, the indices will be shuffled randomly.
         interaction_types : iterable
             All interaction types to be considered.
         """
-        with open(pickle_path, 'rb') as f:
+        with open(path, 'rb') as f:
             data = pickle.load(f, encoding='bytes')
         self.features, self.coordinates, self.targets, self.baselines = [], [], [], []
         for class_label, interaction_type in enumerate(interaction_types):
@@ -41,17 +41,21 @@ class TestDataset(object):
         self.targets = np.array(self.targets)
         self.baselines = np.array(self.baselines)
         idx = np.arange(len(self.features))
-        validation_start = int(len(self.features) * (1 - validation_portion))
+        validation_start = int(len(self.features) * validation_portion)
+        training_start = int(len(self.features) * (validation_portion + test_portion))
         if shuffle:
             np.random.shuffle(idx)
-        self.idx_train = idx[:validation_start]
-        self.idx_validation = idx[validation_start:]
+        self.idx_test = idx[ : validation_start]
+        self.idx_val = idx[validation_start : training_start]
+        self.idx_train = idx[training_start : ]
 
-    def get_baseline_accuracy(self, threshold=2.0):
+    def get_baseline_accuracy(self, dataset='val', threshold=2.0):
         """ Calculates the accuracy on the validation set using the baseline method. 
         
         Parameters:
         -----------
+        dataset : 'train' or 'val' or 'test'
+            The dataset to access.
         threshold : float
             The llh delta value to treshold the classification. All events greater or equal than
             the threshold will be assigned the track class.
@@ -61,8 +65,9 @@ class TestDataset(object):
         accuracy : float
             The baseline accuracy on the validation data.
         """
-        y_true = self.targets[self.idx_validation]
-        y_baseline = (self.baselines[self.idx_validation] >= 2.0).astype(np.float)
+        idx = self._get_idx(dataset)
+        y_true = self.targets[idx]
+        y_baseline = (self.baselines[idx] >= threshold).astype(np.float)
         return (y_true == y_baseline).sum() / y_true.shape[0]
 
     def get_class_prior(self):
@@ -79,17 +84,62 @@ class TestDataset(object):
             class_prior[label] = count / self.idx_train.shape[0]
         return class_prior
 
-    def size(self, train=True):
-        return len(self.idx_train) if train else len(self.idx_validation)
+    def size(self, dataset='train'):
+        """ Gets the number of samples in a dataset. 
+        
+        Parameters:
+        -----------
+        dataset : 'train' or 'val' or 'test'
+            The dataset to access.
+        
+        Returns:
+        --------
+        size : int
+            The size of the dataset.
+        """
+        idx = self._get_idx(dataset)
+        return len(idx)
 
-    def get_batches(self, batch_size=32, train=True):
+    def get_number_features(self):
+        """ Returns the number of features in the dataset. 
+        
+        Returns:
+        --------
+        num_features : int
+            The number of features the input graphs have.
+        """
+        return self.features[0].shape[1]
+
+    def _get_idx(self, dataset):
+        """ Returns all indices associated with a certain dataset type.
+        
+        Parameters:
+        -----------
+        dataset : 'train' or 'val' or 'test'
+            The dataset to access. 
+            
+        Returns:
+        --------
+        idx : ndarray, shape [N]
+            The indices for the respective dataset.    
+        """
+        if dataset == 'train':
+            return self.idx_train
+        elif dataset == 'val':
+            return self.idx_val
+        elif dataset == 'test':
+            return self.idx_test
+        else:
+            raise RuntimeError(f'Unkown dataset type {dataset}')
+
+    def get_batches(self, batch_size=32, dataset='train'):
         """ Generator method for retrieving the data. 
         Parameters:
         -----------
         batch_size : int
             The batch size.
-        train : bool
-            If true, returns training data, otherwise validation data.
+        dataset : 'train' or 'val' or 'test'
+            The dataset to access.
         
         Yields:
         -------
@@ -102,10 +152,10 @@ class TestDataset(object):
         targets : ndarray, shape [batch_size]
             Class labels.
         """
-        idxs = self.idx_train if train else self.idx_validation
+        idxs = self._get_idx(dataset)
         # Loop over the dataset
         while True:
-            for idx in range(0, len(self.idx_train), batch_size):
+            for idx in range(0, idxs.shape[0], batch_size):
                 batch_idxs = idxs[idx : min(len(self.idx_train), idx + batch_size)]
                 features, coordinates, masks = self.pad_batch(batch_idxs)
                 targets = self.targets[batch_idxs]
@@ -133,7 +183,7 @@ class TestDataset(object):
         coordinates = self.coordinates[batch_idxs]
         batch_size = len(batch_idxs)
         padded_size = max(map(lambda x: x.shape[0], self.features[batch_idxs]))
-        num_features = 6 #features[0].shape[1]
+        num_features = features[0].shape[1]
         num_coordinates = coordinates[0].shape[1]
         features_padded = np.zeros((batch_size, padded_size, num_features))
         coordinates_padded = np.zeros((batch_size, padded_size, num_coordinates))
