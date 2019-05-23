@@ -66,7 +66,7 @@ def get_events_from_frame(frame, charge_threshold=0.5):
         LLH values that are thresholded in order to get a classification baseline.
     """
     track_reco = frame['IC86_Dunkman_L6_PegLeg_MultiNest8D_Track']
-    x = frame['InIcePulses']
+    x = frame['TWOfflinePulsesDC']
     hits = x.apply(frame)
     
     doms, vertices, omkeys, baselines = [], [], [], []
@@ -139,6 +139,9 @@ def process_frame(frame):
     frame : ?
         The frame to process.
     """
+    # Obtain the PDG Encoding for ground truth
+    frame['PDGEncoding'] = dataclasses.I3Double(
+        dataclasses.get_most_energetic_neutrino(frame['I3MCTree']).pdg_encoding)
     features, coordinates, _, baselines = get_normalized_data_from_frame(frame)
     frame['NumberVertices'] = dataclasses.I3Double(features.shape[0])
     frame['CumulativeCharge'] = dataclasses.I3VectorFloat(features[:, 0])
@@ -171,7 +174,9 @@ def create_dataset(outfile, infiles):
     tray.AddModule('I3Reader',
                 FilenameList = infiles)
     tray.AddModule(process_frame, 'process_frame')
-    tray.AddModule(I3TableWriter, 'I3TableWriter', keys=['NumberVertices', 'CumulativeCharge', 'Time', 'FirstCharge', 'VertexX', 'VertexY', 'VertexZ'], 
+    tray.AddModule(I3TableWriter, 'I3TableWriter', keys=[
+        'NumberVertices', 'CumulativeCharge', 'Time', 'FirstCharge', 'VertexX', 'VertexY', 'VertexZ',
+        'RecoX', 'RecoY', 'RecoZ', 'RecoAzimuth', 'RecoZenith', 'DeltaLLH', 'PDGEncoding'], 
                 TableService=I3HDFTableService(outfile),
                 SubEventStreams=['InIceSplit'],
                 BookEverything=False

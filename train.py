@@ -2,7 +2,7 @@ import tensorflow as tf
 import tensorflow.keras as keras
 import os.path
 from model import GCNN
-import dataset
+from dataset import *
 import numpy as np
 import sys
 tf.enable_eager_execution()
@@ -18,7 +18,7 @@ checkpoint_callback = keras.callbacks.ModelCheckpoint(
 #data = dataset.TestDataset('../test_data/data_centered.pkl')
 #data = dataset.TestDataset('../test_data/test_data_big.pkl')
 #data = dataset.TestDataset()
-data = dataset.TestDataset(sys.argv[1])
+data = TestDataset(sys.argv[1])
 hidden_dimensions_graph_convolutions, hidden_dimensions_fully_connected = eval(sys.argv[2])
 
 #hidden_dimensions_graph_convolutions = [64, 64, 64]
@@ -44,6 +44,7 @@ class LossCalback(tf.keras.callbacks.Callback):
         print(model.evaluate_generator(
             data.get_batches(batch_size=batch_size, train=False),
             steps=data.size(train=False) // batch_size))
+        print(f'Baseline accuracy {data.get_baseline_accuracy()}')
 
 class_prior = data.get_class_prior()
 print('Class prior: ', class_prior)

@@ -2,12 +2,15 @@ import numpy as np
 import pickle
 import tables
 
-test_data = '../test_data/test_data.pkl'
+__all__ = ['TestDataset',]
+
+#test_data = '../test_data/test_data.pkl'
+test_data = '../test_data/data_centered_reco.pkl'
 
 class TestDataset(object):
     """ Dataset mock from a single pickle for testing the model. """
 
-    def __init__(self, pickle_path = '../test_data/test_data.pkl', validation_portion=0.2, shuffle=True, 
+    def __init__(self, pickle_path = test_data, validation_portion=0.2, shuffle=True, 
         interaction_types = (b'numu', b'nue', b'nutau')):
         """ Initializes the test data.
         
@@ -24,21 +27,43 @@ class TestDataset(object):
         """
         with open(pickle_path, 'rb') as f:
             data = pickle.load(f, encoding='bytes')
-        self.features, self.coordinates, self.targets = [], [], []
+        self.features, self.coordinates, self.targets, self.baselines = [], [], [], []
         for class_label, interaction_type in enumerate(interaction_types):
             has_track = interaction_type == b'numu'
             self.features += data[interaction_type][b'features']
             self.coordinates += data[interaction_type][b'coordinates']
             self.targets += [np.float32(has_track)] * len(data[interaction_type][b'features'])
+            for baseline in data[interaction_type][b'baselines']:
+                assert (baseline[0] == baseline).all()
+                self.baselines.append(baseline[0])
         self.features = np.array(self.features)
         self.coordinates = np.array(self.coordinates)
         self.targets = np.array(self.targets)
+        self.baselines = np.array(self.baselines)
         idx = np.arange(len(self.features))
         validation_start = int(len(self.features) * (1 - validation_portion))
         if shuffle:
             np.random.shuffle(idx)
         self.idx_train = idx[:validation_start]
         self.idx_validation = idx[validation_start:]
+
+    def get_baseline_accuracy(self, threshold=2.0):
+        """ Calculates the accuracy on the validation set using the baseline method. 
+        
+        Parameters:
+        -----------
+        threshold : float
+            The llh delta value to treshold the classification. All events greater or equal than
+            the threshold will be assigned the track class.
+        
+        Returns:
+        --------
+        accuracy : float
+            The baseline accuracy on the validation data.
+        """
+        y_true = self.targets[self.idx_validation]
+        y_baseline = (self.baselines[self.idx_validation] >= 2.0).astype(np.float)
+        return (y_true == y_baseline).sum() / y_true.shape[0]
 
     def get_class_prior(self):
         """ Returns the class prior, i.e. the number of samples per class for the dataset. 
@@ -108,42 +133,16 @@ class TestDataset(object):
         coordinates = self.coordinates[batch_idxs]
         batch_size = len(batch_idxs)
         padded_size = max(map(lambda x: x.shape[0], self.features[batch_idxs]))
-        num_features = features[0].shape[1]
+        num_features = 6 #features[0].shape[1]
         num_coordinates = coordinates[0].shape[1]
         features_padded = np.zeros((batch_size, padded_size, num_features))
         coordinates_padded = np.zeros((batch_size, padded_size, num_coordinates))
         masks = np.zeros((batch_size, padded_size, padded_size))
         for idx, (f, c) in enumerate(zip(features, coordinates)):
+            # For testing remove features 3, 4, 5, 6, 7
+            # f = np.delete(f, [3, 4, 5, 6, 7], axis=1)
             features_padded[idx, :f.shape[0], :] = f
             coordinates_padded[idx, :c.shape[0], :] = c
             masks[idx, :f.shape[0], :f.shape[0]] = 1
         return features_padded, coordinates_padded, masks
-
-
-class HDF5Dataset(object):
-    """ Class to iterate over an HDF5 Dataset. """
-
-    def __init__(self, files, validation_portion=0.1, test_portion=0.1, shuffle=True):
-        """ Initlaizes the dataset wrapper from multiple hdf5 files, each corresponding to exactly one class label.
-        
-        Parameters:
-        -----------
-        files : dict
-            A dict that maps class labels (integers) to lists of hdf5 file paths.
-        validation_portion : float
-            The fraction of the dataset that is kept from the model during training for validation.
-        test_portion = 0.1
-            The fraction of the dataset that is kept form the model during training and only evaulated after training has finished.
-        shuffle : bool
-            If True, the data will be shuffled randomly.
-        """
-        self.files = {
-            label : [tables.open_file(filepath) for filepath in files[label]] for label in files
-        }
-        # Count the total number of samples in all files
-        number_samples = 0
-        for label in self.files:
-            for file in self.files[label]:
-                number_samples += len(table_file.root.VertexOffsets.cols.item)
-        self.idx = np.arange(self.number_samples)
 
