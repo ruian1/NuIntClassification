@@ -45,6 +45,7 @@ class LossLoggingCalback(tf.keras.callbacks.Callback):
         print(f'Baseline accuracy {baseline_accuracy}')
 
 if __name__ == '__main__':
+
     parser = argparse.ArgumentParser()
     parser.add_argument('settings', help='Settings for the model. See default_settings.json for the default settings. Values are updated with the settings passed here.')
     args = parser.parse_args()
@@ -59,17 +60,23 @@ if __name__ == '__main__':
     # Retrieve the dataset
     dataset_type = settings['dataset']['type'].lower()
     if dataset_type == 'pickle':
-        dataset_class = PickleDataset
-    elif dataset_type == 'hdf5':
-        dataset_class = HD5Dataset
+        data = PickleDataset(
+            path = settings['dataset']['path'],
+            validation_portion = settings['dataset']['validation_portion'], 
+            test_portion = settings['dataset']['test_portion'],
+            shuffle = settings['dataset']['shuffle']
+        )
+    elif dataset_type in ('hdf5', 'hd5'):
+        data = HD5Dataset(
+            settings['dataset']['path'],
+            validation_portion = settings['dataset']['validation_portion'], 
+            test_portion = settings['dataset']['test_portion'],
+            shuffle = settings['dataset']['shuffle'],
+            features = settings['dataset']['features'],
+        )
     else:
         raise RuntimeError(f'Unknown dataset type {dataset_type}')
-    data = dataset_class(
-        path = settings['dataset']['path'],
-        validation_portion = settings['dataset']['validation_portion'], 
-        test_portion = settings['dataset']['test_portion'],
-        shuffle = settings['dataset']['shuffle']
-    )
+    
 
     # Build the model
     model_type = settings['model']['type'].lower()

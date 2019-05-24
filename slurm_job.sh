@@ -12,4 +12,4 @@ module load python/3.6
 source ~/myenv/bin/activate
 #pip3 install --upgrade pip
 #pip3 install --no-index -r requirements.txt
-python3 train.py ../test_data/data_centered.pkl '([64,64,64,64,64],[32,32,16,1])' False
+python3 train.py settings/hd5.json
