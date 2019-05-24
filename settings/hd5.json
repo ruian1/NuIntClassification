@@ -1,7 +1,11 @@
 {
     "dataset" : {
         "type" : "hd5",
+<<<<<<< HEAD
         "path" : "../data/data_dragon.hd5",
+=======
+        "path" : "../test_data/data_dragon.hd5",
+>>>>>>> ebd8fb460bbf5e225f87b270d94f02ad7e7e961e
         "validation_portion" : 0.1,
         "test_portion" : 0.1,
         "shuffle" : true,

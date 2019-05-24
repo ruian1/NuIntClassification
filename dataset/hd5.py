@@ -93,6 +93,7 @@ class HD5Dataset(Dataset):
                 features[idx, : padded_number_vertices, :] = self.table.get_node(f'/{feature}').cols.item[offset : offset + number_vertices]
             for coordinate_idx, coordinate in enumerate(self.coordinates):
                 coordinates[idx, : padded_number_vertices, :] = self.table.get_node(f'/{coordinate}').cols.item[offset : offset + number_vertices]
+
             masks[idx, : padded_number_vertices, : padded_number_vertices] = 1
         return features, coordinates, masks
 

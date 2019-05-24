@@ -45,6 +45,11 @@ class LossLoggingCalback(tf.keras.callbacks.Callback):
         print(f'Baseline accuracy {baseline_accuracy}')
 
 if __name__ == '__main__':
+<<<<<<< HEAD
+=======
+    d = HD5Dataset('../data/data_dragon.hd5')
+    exit(0)
+>>>>>>> ebd8fb460bbf5e225f87b270d94f02ad7e7e961e
 
     parser = argparse.ArgumentParser()
     parser.add_argument('settings', help='Settings for the model. See default_settings.json for the default settings. Values are updated with the settings passed here.')
@@ -68,7 +73,11 @@ if __name__ == '__main__':
         )
     elif dataset_type in ('hdf5', 'hd5'):
         data = HD5Dataset(
+<<<<<<< HEAD
             settings['dataset']['path'],
+=======
+            path = settings['dataset']['path'],
+>>>>>>> ebd8fb460bbf5e225f87b270d94f02ad7e7e961e
             validation_portion = settings['dataset']['validation_portion'], 
             test_portion = settings['dataset']['test_portion'],
             shuffle = settings['dataset']['shuffle'],
