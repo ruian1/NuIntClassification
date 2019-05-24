@@ -62,14 +62,12 @@ def get_events_from_frame(frame, charge_threshold=0.5):
         Coordinate matrix for the doms that were active during this event.
     omkeys : ndarray, shape [N, 3]
         Omkeys for the doms that were active during this event.
-    baselines : ndarray, shape [N]
-        LLH values that are thresholded in order to get a classification baseline.
     """
     track_reco = frame['IC86_Dunkman_L6_PegLeg_MultiNest8D_Track']
     x = frame['SRTTWOfflinePulsesDC']
     hits = x.apply(frame)
     
-    doms, vertices, omkeys, baselines = [], [], [], []
+    doms, vertices, omkeys = [], [], []
     for omkey, pulses in hits:
         cumulative_charge, tmin, first_charge = 0, np.inf, None
         dom_position = dom_positions[omkey]
@@ -88,10 +86,8 @@ def get_events_from_frame(frame, charge_threshold=0.5):
         ])
         vertices.append([dom_position[axis] for axis in ('x', 'y', 'z')])
         omkeys.append(omkey)
-        delta_llh = frame['IC86_Dunkman_L6']['delta_LLH'] # Used for a baseline classifcation
-        baselines.append(delta_llh)
         
-    return np.array(doms), np.array(vertices), np.array(omkeys), np.array(baselines)
+    return np.array(doms), np.array(vertices), np.array(omkeys)
 
 def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-4, append_coordinates_to_features=True):
     """ Creates normalized features from a frame.
@@ -117,7 +113,7 @@ def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-4, app
         Omkeys for the doms that were active during this event.
     """
     
-    features, coordinates, omkeys, baselines = get_events_from_frame(frame)
+    features, coordinates, omkeys = get_events_from_frame(frame)
     coordinates, coordinate_mean, coordinate_std = normalize_coordinates(coordinates, features[:, 0])
     features[:, 0] *= charge_scale
     features[:, 2] *= charge_scale
@@ -129,7 +125,7 @@ def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-4, app
     
     if append_coordinates_to_features:
         features = np.hstack((features, coordinates))
-    return features, coordinates, omkeys, baselines
+    return features, coordinates, omkeys
 
 def process_frame(frame):
     """ Callback for processing a frame and adding relevant data to the hdf5 file. 
@@ -145,7 +141,7 @@ def process_frame(frame):
     frame['InteractionType'] = dataclasses.I3Double(frame['I3MCWeightDict']['InteractionType'])
     frame['NumberChannels'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['NchCleaned'])
     frame['TotalCharge'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['DCFiducialPE'])
-    features, coordinates, _, baselines = get_normalized_data_from_frame(frame)
+    features, coordinates, _ = get_normalized_data_from_frame(frame)
     frame['NumberVertices'] = dataclasses.I3Double(features.shape[0])
     frame['CumulativeCharge'] = dataclasses.I3VectorFloat(features[:, 0])
     frame['Time'] = dataclasses.I3VectorFloat(features[:, 1])
@@ -158,7 +154,7 @@ def process_frame(frame):
     frame['RecoZ'] = dataclasses.I3VectorFloat(features[:, 5])
     frame['RecoAzimuth'] = dataclasses.I3VectorFloat(features[:, 6])
     frame['RecoZenith'] = dataclasses.I3VectorFloat(features[:, 7])
-    frame['DeltaLLH'] = dataclasses.I3VectorFloat(baselines)
+    frame['DeltaLLH'] = dataclasses.I3Double(frame['IC86_Dunkman_L6']['delta_LLH']) # Used for a baseline classifcation
     return True
 
 def create_dataset(outfile, infiles):

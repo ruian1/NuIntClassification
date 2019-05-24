@@ -1,11 +1,12 @@
 import numpy as np
 import pickle
 import tables
+from .dataset import Dataset
 
 #test_data = '../test_data/test_data.pkl'
 test_data = '../test_data/data_centered_reco.pkl'
 
-class PickleDataset(object):
+class PickleDataset(Dataset):
     """ Dataset from a single pickle. """
 
     def __init__(self, path = test_data, validation_portion=0.1, test_portion=0.1, shuffle=True, 
@@ -27,19 +28,19 @@ class PickleDataset(object):
         """
         with open(path, 'rb') as f:
             data = pickle.load(f, encoding='bytes')
-        self.features, self.coordinates, self.targets, self.baselines = [], [], [], []
+        self.features, self.coordinates, self.targets, self.delta_loglikelihood = [], [], [], []
         for class_label, interaction_type in enumerate(interaction_types):
             has_track = interaction_type == b'numu'
             self.features += data[interaction_type][b'features']
             self.coordinates += data[interaction_type][b'coordinates']
             self.targets += [np.float32(has_track)] * len(data[interaction_type][b'features'])
-            for baseline in data[interaction_type][b'baselines']:
-                assert (baseline[0] == baseline).all()
-                self.baselines.append(baseline[0])
+            for delta_llh in data[interaction_type][b'baselines']:
+                assert (delta_llh[0] == delta_llh).all()
+                self.delta_loglikelihood.append(delta_llh[0])
         self.features = np.array(self.features)
         self.coordinates = np.array(self.coordinates)
         self.targets = np.array(self.targets)
-        self.baselines = np.array(self.baselines)
+        self.delta_loglikelihood = np.array(self.delta_loglikelihood)
         idx = np.arange(len(self.features))
         validation_start = int(len(self.features) * validation_portion)
         training_start = int(len(self.features) * (validation_portion + test_portion))
@@ -48,57 +49,6 @@ class PickleDataset(object):
         self.idx_test = idx[ : validation_start]
         self.idx_val = idx[validation_start : training_start]
         self.idx_train = idx[training_start : ]
-
-    def get_baseline_accuracy(self, dataset='val', threshold=2.0):
-        """ Calculates the accuracy on the validation set using the baseline method. 
-        
-        Parameters:
-        -----------
-        dataset : 'train' or 'val' or 'test'
-            The dataset to access.
-        threshold : float
-            The llh delta value to treshold the classification. All events greater or equal than
-            the threshold will be assigned the track class.
-        
-        Returns:
-        --------
-        accuracy : float
-            The baseline accuracy on the validation data.
-        """
-        idx = self._get_idx(dataset)
-        y_true = self.targets[idx]
-        y_baseline = (self.baselines[idx] >= threshold).astype(np.float)
-        return (y_true == y_baseline).sum() / y_true.shape[0]
-
-    def get_class_prior(self):
-        """ Returns the class prior, i.e. the number of samples per class for the dataset. 
-        
-        Returns:
-        --------
-        class_prior : dict
-            A dict mapping from class label to float fractions.
-        """
-        labels, counts = np.unique(self.targets[self.idx_train], return_counts=True)
-        class_prior = {}
-        for label, count in zip(labels, counts):
-            class_prior[label] = count / self.idx_train.shape[0]
-        return class_prior
-
-    def size(self, dataset='train'):
-        """ Gets the number of samples in a dataset. 
-        
-        Parameters:
-        -----------
-        dataset : 'train' or 'val' or 'test'
-            The dataset to access.
-        
-        Returns:
-        --------
-        size : int
-            The size of the dataset.
-        """
-        idx = self._get_idx(dataset)
-        return len(idx)
 
     def get_number_features(self):
         """ Returns the number of features in the dataset. 
@@ -110,59 +60,7 @@ class PickleDataset(object):
         """
         return self.features[0].shape[1]
 
-    def _get_idx(self, dataset):
-        """ Returns all indices associated with a certain dataset type.
-        
-        Parameters:
-        -----------
-        dataset : 'train' or 'val' or 'test'
-            The dataset to access. 
-            
-        Returns:
-        --------
-        idx : ndarray, shape [N]
-            The indices for the respective dataset.    
-        """
-        if dataset == 'train':
-            return self.idx_train
-        elif dataset == 'val':
-            return self.idx_val
-        elif dataset == 'test':
-            return self.idx_test
-        else:
-            raise RuntimeError(f'Unkown dataset type {dataset}')
-
-    def get_batches(self, batch_size=32, dataset='train'):
-        """ Generator method for retrieving the data. 
-        Parameters:
-        -----------
-        batch_size : int
-            The batch size.
-        dataset : 'train' or 'val' or 'test'
-            The dataset to access.
-        
-        Yields:
-        -------
-        features_padded : ndarray, shape [batch_size, N_max, D]
-            Feature matrices for n graphs.
-        coordinates_padded : ndarray, shape [batch_size, N_max, 3]
-            Coordinate matrices for n graphs.
-        masks : ndarray, shape [batch_size, N_max, N_max]
-            Adjacency matrix mask for each of the graphs.
-        targets : ndarray, shape [batch_size]
-            Class labels.
-        """
-        idxs = self._get_idx(dataset)
-        # Loop over the dataset
-        while True:
-            for idx in range(0, idxs.shape[0], batch_size):
-                batch_idxs = idxs[idx : min(len(self.idx_train), idx + batch_size)]
-                features, coordinates, masks = self.pad_batch(batch_idxs)
-                targets = self.targets[batch_idxs]
-                yield [features, coordinates, masks], targets
-                
-
-    def pad_batch(self, batch_idxs):
+    def get_padded_batch(self, batch_idxs):
         """ Pads a batch with zeros and creats a mask.
         
         Parameters:
