@@ -1,6 +1,6 @@
 import numpy as np
 import pickle
-import tables
+import h5py
 from collections import defaultdict
 from .dataset import Dataset
 
@@ -29,12 +29,12 @@ class HD5Dataset(Dataset):
             A list of columns that correspond to the spatial coordinates of the vertices.
         """
         super().__init__()
-        self.table = tables.open_file(filepath)
+        self.file = h5py.File(filepath, 'r')
         self.features = features
         self.coordinates = coordinates
         # Create lookup arrays for the graph size of each sample and their offsets in the feature matrix 
         # since all the features of all graphs are stacked in one big table
-        self.number_vertices = np.array(self.table.root.NumberVertices.cols.value, dtype = np.int32)
+        self.number_vertices = np.array(self.file['NumberVertices']['value'], dtype = np.int32)
         self.sample_offsets = np.cumsum(self.number_vertices) - self.number_vertices
         idx = np.arange(self.number_vertices.shape[0])
         if shuffle:
@@ -49,8 +49,8 @@ class HD5Dataset(Dataset):
 
     def _create_targets(self):
         """ Builds the targets for classification. """
-        interaction_type = np.array(self.table.root.InteractionType.cols.value, dtype=np.int)
-        pdg_encoding = np.array(self.table.root.PDGEncoding.cols.value, dtype=np.int)
+        interaction_type = np.array(self.file['InteractionType']['value'], dtype=np.uint8)
+        pdg_encoding = np.array(self.file['PDGEncoding']['value'], dtype=np.uint8)
         has_track = np.logical_and(pdg_encoding == 14, interaction_type == 1)
         self.targets = has_track.astype(np.int)
 
@@ -90,11 +90,10 @@ class HD5Dataset(Dataset):
             number_vertices = self.number_vertices[batch_idx]
             offset = self.sample_offsets[batch_idx]
             for feature_idx, feature in enumerate(self.features):
-                features[idx, : padded_number_vertices, :] = self.table.get_node(f'/{feature}').cols.item[offset : offset + number_vertices]
+                features[idx, : number_vertices, feature_idx] = self.file.get(feature)[offset : offset + number_vertices]['item']
             for coordinate_idx, coordinate in enumerate(self.coordinates):
-                coordinates[idx, : padded_number_vertices, :] = self.table.get_node(f'/{coordinate}').cols.item[offset : offset + number_vertices]
-
-            masks[idx, : padded_number_vertices, : padded_number_vertices] = 1
+                coordinates[idx, : number_vertices, coordinate_idx] = self.file.get(coordinate)[offset : offset + number_vertices]['item']
+            masks[idx, : number_vertices, : number_vertices] = 1
         return features, coordinates, masks
 
 if __name__ == '__main__':

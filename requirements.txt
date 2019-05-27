@@ -19,4 +19,4 @@ termcolor==1.1.0
 virtualenv==15.1.0
 Werkzeug==0.15.2
 argparse
-tables
+h5py
