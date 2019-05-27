@@ -3,6 +3,7 @@ import pickle
 import h5py
 from collections import defaultdict
 from .dataset import Dataset
+import tempfile
 
 __all__ = ['HD5Dataset',]
 
@@ -30,8 +31,8 @@ class HD5Dataset(Dataset):
         """
         super().__init__()
         self.file = h5py.File(filepath, 'r')
-        self.features = features
-        self.coordinates = coordinates
+        self.feature_names = features
+        self.coordinate_names = coordinates
         # Create lookup arrays for the graph size of each sample and their offsets in the feature matrix 
         # since all the features of all graphs are stacked in one big table
         self.number_vertices = np.array(self.file['NumberVertices']['value'], dtype = np.int32)
@@ -44,8 +45,19 @@ class HD5Dataset(Dataset):
         self.idx_test = idx[ : first_validation_idx]
         self.idx_val = idx[first_validation_idx : first_training_idx]
         self.idx_train = idx[first_training_idx : ]
+
+        # Create memmaps in order to access the data without iterating and shuffling in place
+        feature_file = tempfile.NamedTemporaryFile('w+')
+        self.features = np.memmap(feature_file.name, shape=(int(self.number_vertices.sum()), len(self.feature_names)))
+        for feature_idx, feature in enumerate(self.feature_names):
+            self.features[:, feature_idx] = self.file.get(feature)['item']
+        coordinate_file = tempfile.NamedTemporaryFile('w+')
+        self.coordinates = np.memmap(coordinate_file.name, shape=(int(self.number_vertices.sum()), len(self.coordinate_names)))
+        for coordinate_idx, coordinate in enumerate(self.coordinate_names):
+            self.coordinates[:, coordinate_idx] = self.file.get(coordinate)['item']
+        print('Created memory map arrays.')
         self._create_targets()
-        self.delta_loglikelihood = self.targets.copy() #np.array(self.table.root.DeltaLLH.cols.item)
+        self.delta_loglikelihood = np.array(self.file.get('DeltaLLH')['value'])
 
     def _create_targets(self):
         """ Builds the targets for classification. """
@@ -62,7 +74,7 @@ class HD5Dataset(Dataset):
         num_features : int
             The number of features the input graphs have.
         """
-        return len(self.features)
+        return len(self.feature_names)
 
     def get_padded_batch(self, batch_idxs):
         """ Pads a batch with zeros and creats a mask.
@@ -83,16 +95,14 @@ class HD5Dataset(Dataset):
         """
         # Collect the features
         padded_number_vertices = np.max(self.number_vertices[batch_idxs])
-        features = np.zeros((batch_idxs.shape[0], padded_number_vertices, len(self.features)))
-        coordinates = np.zeros((batch_idxs.shape[0], padded_number_vertices, len(self.coordinates)))
+        features = np.zeros((batch_idxs.shape[0], padded_number_vertices, len(self.feature_names)))
+        coordinates = np.zeros((batch_idxs.shape[0], padded_number_vertices, len(self.coordinate_names)))
         masks = np.zeros((batch_idxs.shape[0], padded_number_vertices, padded_number_vertices))
         for idx, batch_idx in enumerate(batch_idxs):
             number_vertices = self.number_vertices[batch_idx]
             offset = self.sample_offsets[batch_idx]
-            for feature_idx, feature in enumerate(self.features):
-                features[idx, : number_vertices, feature_idx] = self.file.get(feature)[offset : offset + number_vertices]['item']
-            for coordinate_idx, coordinate in enumerate(self.coordinates):
-                coordinates[idx, : number_vertices, coordinate_idx] = self.file.get(coordinate)[offset : offset + number_vertices]['item']
+            features[idx, : number_vertices, :] = self.features[offset : offset + number_vertices]
+            coordinates[idx, : number_vertices, :] = self.coordinates[offset : offset + number_vertices]
             masks[idx, : number_vertices, : number_vertices] = 1
         return features, coordinates, masks
 
