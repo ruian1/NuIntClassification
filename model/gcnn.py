@@ -3,12 +3,12 @@ from tensorflow import keras
 import numpy as np
 tf.enable_eager_execution()
 
-class GCNN(keras.Model):
-    """ Model for a Graph Convolutional Network with dense graph structure. The graph is obtained using
+class RGCNN(keras.Model):
+    """ Model for a Recurrent, Graph Convolutional Network with dense graph structure. The graph is obtained using
     a Gaussian kernel on the pairwise node distances. """
 
-    def __init__(self, num_input_features, units_graph_convolutions = [64, 64], units_fully_connected = [32, 1], 
-        dropout_rate=0.5, use_batchnorm=True):
+    def __init__(self, num_input_features, units_graph_convolutions = [64, 64], units_fully_connected = [32, 32],
+        units_lstm = [32, 16, 1], dropout_rate=0.5, use_batchnorm=True):
         """ Creates a GCNN model. 
 
         Parameters:
@@ -19,15 +19,17 @@ class GCNN(keras.Model):
             The hidden units for each layer of graph convolution.
         units_fully_connected : list
             The hidden units for each fully connected layer.
+        units_lstm : list
+            The hidden units for each LSTM layer.
         dropout_rate : float
             Dropout rate.
         use_batchnorm : bool
             If batch normalization should be applied.
         """
         super().__init__()
-        self.is_binary_classifier = (units_graph_convolutions + units_fully_connected)[-1] == 1
+        self.is_binary_classifier = (units_graph_convolutions + units_fully_connected + units_lstm)[-1] == 1
         self.adjacency_layer = AdjacencyMatrixLayer()
-        self.graph_convolutions, self.fully_connecteds = [], []
+        self.graph_convolutions, self.fully_connecteds, self.lstms = [], [], []
 
         # Add graph convolution blocks
         for layer_idx, hidden_dimension in enumerate(units_graph_convolutions):
@@ -55,6 +57,13 @@ class GCNN(keras.Model):
                 self.fully_connecteds.append(
                     keras.layers.Dropout(dropout_rate)
                 )
+        
+        # Add LSTM blocks
+        for layer_idx, hidden_dimension in enumerate(units_lstm):
+            is_last_layer = layer_idx == len(units_lstm) - 1
+            self.lstms.append(
+                keras.layers.Bidirectional(keras.layers.LSTM(hidden_dimension, return_sequences=not is_last_layer))
+            )
 
     def call(self, inputs):
         # Graph convolutions
@@ -67,6 +76,9 @@ class GCNN(keras.Model):
         x = tf.reduce_sum(x, axis=1)
         # Fully connected layers
         for layer in self.fully_connecteds:
+            x = layer(x)
+        # Recurrent blocks
+        for layer in self.lstms:
             x = layer(x)
         # Output activation
         if self.is_binary_classifier:
@@ -111,14 +123,14 @@ class GCNNBlock(keras.layers.Layer):
     def call(self, inputs):
         inputs, A, masks = inputs
         x = tf.matmul(A, inputs)
-        x = tf.concat([x, inputs], axis=2)
+        x = tf.concat([x, inputs], axis=3)
         x = self.dense(x)
         #x += self.bias
         if self.use_batchnorm:
             x = self.bn([x, masks])
         if self.use_activation:
             activated = self.activation(x)
-            x = tf.concat([x, activated], axis=2)
+            x = tf.concat([x, activated], axis=3)
         if self.dropout_rate:
             x = self.dropout(x)
         return x
@@ -137,9 +149,9 @@ class AdjacencyMatrixLayer(keras.layers.Layer):
         # Using the identity: D[i, j] = (c[i] - c[j])(c[i] - c[j])^T = r[i] - 2 c[i]c[j]^T + r[j]
         # where r[i] is the squared L2 norm of the i-th coordinate
         coordinates, masks = inputs
-        coordinate_norms = tf.reduce_sum(coordinates ** 2, 2)
-        coordinate_norms = tf.expand_dims(coordinate_norms, 2)
-        distances = coordinate_norms - 2 * tf.matmul(coordinates, tf.transpose(coordinates, perm=[0, 2, 1])) + tf.transpose(coordinate_norms, perm=[0, 2, 1])
+        coordinate_norms = tf.reduce_sum(coordinates ** 2, 3, keepdims=True)
+
+        distances = coordinate_norms - 2 * tf.matmul(coordinates, tf.transpose(coordinates, perm=[0, 1, 3, 2])) + tf.transpose(coordinate_norms, perm=[0, 1, 3, 2])
         # Apply a gaussian kernel and normalize using a softmax
         A = tf.exp(-distances / (self.sigma ** 2))
         return tf.nn.softmax(A, axis=2)
@@ -155,15 +167,16 @@ class FeatureNormalization(keras.layers.Layer):
     def build(self, input_shape):
         # TODO: add gamma and mu parameters for learnable centering and scaling
         shape_X, _ = input_shape
-        self.beta = self.add_weight('beta', shape=[1, 1, shape_X.as_list()[2]])
-        self.gamma = self.add_weight('gamma', shape=[1, 1, shape_X.as_list()[2]])
+        self.beta = self.add_weight('beta', shape=[1, 1, 1, shape_X.as_list()[3]])
+        self.gamma = self.add_weight('gamma', shape=[1, 1, 1, shape_X.as_list()[3]])
 
     def call(self, inputs):
         X, masks = inputs # X is of shape [num_samples, num_vertices, num_features]
-        X_mean = tf.expand_dims(padded_vertex_mean(X, masks), 1)
+        X_mean = tf.expand_dims(padded_vertex_mean(X, masks), 2)
         X_centered = X - X_mean
+        print(X_centered.get_shape())
         X_var = padded_vertex_mean(X_centered ** 2, masks)
-        X_normalized = X_centered / tf.expand_dims(tf.sqrt(X_var) + 1e-20, 1)
+        X_normalized = X_centered / tf.expand_dims(tf.sqrt(X_var) + 1e-20, 2)
         return self.gamma * X_normalized + self.beta
 
 
@@ -172,20 +185,21 @@ def padded_vertex_mean(X, masks):
     
     Parameters:
     -----------
-    X : tf.tensor, shape [num_batches, num_vertices, D]
+    X : tf.tensor, shape [num_batches, num_steps, num_vertices, D]
         The tensor to calculate the mean over all vertices (axis 1).
     masks : tf.tensor, shape [num_batches, num_vertices, num_vertices]
         Masks for adjacency matrix of the graphs.
 
     Returns:
     --------
-    X_mean : tf.tensor, shape [num_batches, D]
+    X_mean : tf.tensor, shape [num_batches, num_steps, D]
         Mean over all non-padded vertices.
     """
     vertex_masks = tf.reduce_max(masks, axis=[-1]) # Masking each vertex individually 
-    num_vertices = tf.reduce_sum(vertex_masks, axis=1) # Number of vertices per sample
-    X_mean = tf.reduce_sum(X, axis=1)
-    X_mean /= tf.reshape(num_vertices, (-1, 1)) + 1e-20
+    num_vertices = tf.reduce_sum(vertex_masks, axis=2, keepdims=True) # Number of vertices per sample
+    X_mean = tf.reduce_sum(X, axis=2)
+
+    X_mean /= num_vertices + 1e-20
     return X_mean
     
 def padded_softmax(A, masks):
@@ -193,20 +207,20 @@ def padded_softmax(A, masks):
     
     Parameters:
     -----------
-    A : tf.tensor, shape [num_samples, num_vertices, num_vertices]
+    A : tf.tensor, shape [num_samples, num_steps, num_vertices, num_vertices]
         The adjacency matrices.
-    masks : tf.tensor, shape [num_samples, num_vertices, num_vertices]
+    masks : tf.tensor, shape [num_samples, num_steps, num_vertices, num_vertices]
         The masks for the adjacency matrices.
 
     Returns:
     --------
-    A : tf.tensor, shape [num_samples, num_vertices, num_vertices]  
+    A : tf.tensor, shape [num_samples, num_steps, num_vertices, num_vertices]  
         The masked adjacency matrices normalized using a softmax while considering padded vertices.
     """
-    A = tf.nn.softmax(A, axis=2)
+    A = tf.nn.softmax(A, axis=3)
     return A
     A *= masks
-    normalization = tf.reduce_sum(A, axis=2, keepdims=True) + 1e-20
+    normalization = tf.reduce_sum(A, axis=3, keepdims=True) + 1e-20
     return A / normalization
 
 
