@@ -116,7 +116,11 @@ def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-4, app
         Omkeys for the doms that were active during this event.
     """
     
+<<<<<<< HEAD
     features, coordinates, omkeys = get_events_from_frame(frame)
+=======
+    event_features, coordinates, omkeys = get_events_from_frame(frame)
+>>>>>>> 456e5c1ef0e3849bf7ef8244086efa35af018641
     coordinates, coordinate_mean, coordinate_std = normalize_coordinates(coordinates, None)
     features[:, :, 0] *= charge_scale
     features[:, :, 2] *= charge_scale
@@ -128,8 +132,13 @@ def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-4, app
     
     if append_coordinates_to_features:
         num_steps = features.shape[0]
+<<<<<<< HEAD
         #features = np.stack((features, np.repeat(features[np.newaxis, :, :], num_steps)))
         features = np.concatenate((features, np.repeat(coordinates[np.newaxis, :, :], num_steps)), axis=-1)
+=======
+        features = np.stack((features, np.repeat(features[np.newaxis, :, :], num_steps)))
+        features = np.concatenate((features, coordinates), axis=-1)
+>>>>>>> 456e5c1ef0e3849bf7ef8244086efa35af018641
     return features, coordinates, omkeys
 
 # Global variable for the offset of the event in the big table
