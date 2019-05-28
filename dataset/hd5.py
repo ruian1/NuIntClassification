@@ -99,13 +99,15 @@ class HD5Dataset(Dataset):
         """
         # Collect the features
         padded_number_vertices = np.max(self.number_vertices[batch_idxs])
-        features = np.zeros((batch_idxs.shape[0], padded_number_vertices, len(self.feature_names)))
+        # Testing: Add Delta LLH
+        features = np.zeros((batch_idxs.shape[0], padded_number_vertices, len(self.feature_names) + 1))
         coordinates = np.zeros((batch_idxs.shape[0], padded_number_vertices, len(self.coordinate_names)))
         masks = np.zeros((batch_idxs.shape[0], padded_number_vertices, padded_number_vertices))
         for idx, batch_idx in enumerate(batch_idxs):
             number_vertices = self.number_vertices[batch_idx]
             offset = self.sample_offsets[batch_idx]
-            features[idx, : number_vertices, :] = self.features[offset : offset + number_vertices]
+            features[idx, : number_vertices, : len(self.feature_names)] = self.features[offset : offset + number_vertices]
+            features[idx, : number_vertices, len(self.feature_names)] = self.delta_loglikelihood[idx]
             coordinates[idx, : number_vertices, :] = self.coordinates[offset : offset + number_vertices]
             masks[idx, : number_vertices, : number_vertices] = 1
         return features, coordinates, masks
