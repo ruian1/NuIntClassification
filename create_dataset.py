@@ -56,9 +56,9 @@ def get_events_from_frame(frame, charge_threshold=0.5):
     
     Returns:
     --------
-    dom_features : ndarray, shape [num_steps, N, 8]
+    event_features : ndarray, shape [num_steps, N, 8]
         Feature matrix for the doms that were active during this event.
-    dom_positions : ndarray, shape [num_steps, N, 3]
+    dom_positions : ndarray, shape [N, 3]
         Coordinate matrix for the doms that were active during this event.
     omkeys : ndarray, shape [num_steps, N, 3]
         Omkeys for the doms that were active during this event.
@@ -70,39 +70,27 @@ def get_events_from_frame(frame, charge_threshold=0.5):
     events, event_to_vertex, vertices, omkeys = [], [], [], []
     for vertex_idx, (omkey, pulses) in enumerate(hits):
         dom_position = dom_positions[omkey]
+        vertices.append([dom_position[axis] for axis in ('x', 'y', 'z')])
         cumulative_charge = 0
         for pulse in pulses:
             cumulative_charge += pulse.charge
             if pulse.charge >= charge_threshold:
                 events.append(np.array([
-                    pulse.charge, pulse.time, pulse.cumulative_charge
+                    pulse.charge, pulse.time, cumulative_charge, track_reco.pos.x, track_reco.pos.y, 
+                    track_reco.pos.z, track_reco.dir.azimuth, track_reco.dir.zenith
                 ]))
                 event_to_vertex.append(vertex_idx)
-        vertices.append([dom_position[axis] for axis in ('x', 'y', 'z')])
+        omkeys.append(omkey)
 
     # Sort events by their time
     events.sort(key = lambda event: event[1])
     
-    features = np.zeros((len(events), len(vertices), len(events[0])))
+    event_features = np.zeros((len(events), len(vertices), len(events[0])))
     for idx, event in enumerate(events):
-        features[idx, event_to_vertex[idx], : ] = event
-    
-
-
-
-
-
-
-        # Features:
-        # Cumulative Charge per DOM, Time of first charge above threshold, First charge above threshold,
-        # Reconstruction x, Reconstruction y, Reconstrucion z, Reconstruction azimuth, Reconstruction zenith
-        doms.append([
-            cumulative_charge, tmin, pulses[0].charge, track_reco.pos.x, track_reco.pos.y, 
-            track_reco.pos.z, track_reco.dir.azimuth, track_reco.dir.zenith
-        ])
-        omkeys.append(omkey)
+        # From the time step of the arrival of the event on it will be visible in following events
+        event_features[idx : , event_to_vertex[idx], : ] = event
         
-    return np.array(doms), np.array(vertices), np.array(omkeys)
+    return event_features, np.array(vertices), np.array(omkeys)
 
 def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-4, append_coordinates_to_features=True):
     """ Creates normalized features from a frame.
@@ -120,7 +108,7 @@ def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-4, app
         
     Returns:
     --------
-    dom_features : ndarray, shape [N, 11]
+    dom_features : ndarray, shape [num_steps, N, 8 or 11]
         Feature matrix for the doms that were active during this event.
     dom_positions : ndarray, shape [N, 3]
         Coordinate matrix for the doms that were active during this event. All values are in range [0, 1]
@@ -129,18 +117,23 @@ def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-4, app
     """
     
     features, coordinates, omkeys = get_events_from_frame(frame)
-    coordinates, coordinate_mean, coordinate_std = normalize_coordinates(coordinates, features[:, 0])
-    features[:, 0] *= charge_scale
-    features[:, 2] *= charge_scale
-    features[:, 1] -= features[:, 1].min()
-    features[:, 1] *= time_scale
+    coordinates, coordinate_mean, coordinate_std = normalize_coordinates(coordinates, None)
+    features[:, :, 0] *= charge_scale
+    features[:, :, 2] *= charge_scale
+    features[:, :, 1] -= features[:, 1].min()
+    features[:, :, 1] *= time_scale
     # Scale the origin of the track reconstruction to share the same coordinate system
-    features[:, 3:6] -= coordinate_mean
-    features[:, 3:6] /= coordinate_std
+    features[:, :, 3:6] -= coordinate_mean
+    features[:, :, 3:6] /= coordinate_std
     
     if append_coordinates_to_features:
-        features = np.hstack((features, coordinates))
+        num_steps = features.shape[0]
+        #features = np.stack((features, np.repeat(features[np.newaxis, :, :], num_steps)))
+        features = np.concatenate((features, np.repeat(coordinates[np.newaxis, :, :], num_steps)), axis=-1)
     return features, coordinates, omkeys
+
+# Global variable for the offset of the event in the big table
+event_offset = None
 
 def process_frame(frame):
     """ Callback for processing a frame and adding relevant data to the hdf5 file. 
@@ -150,6 +143,7 @@ def process_frame(frame):
     frame : ?
         The frame to process.
     """
+    global event_offset
     # Obtain the PDG Encoding for ground truth
     frame['PDGEncoding'] = dataclasses.I3Double(
         dataclasses.get_most_energetic_neutrino(frame['I3MCTree']).pdg_encoding)
@@ -157,7 +151,13 @@ def process_frame(frame):
     frame['NumberChannels'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['NchCleaned'])
     frame['TotalCharge'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['DCFiducialPE'])
     features, coordinates, _ = get_normalized_data_from_frame(frame)
-    frame['NumberVertices'] = dataclasses.I3Double(features.shape[0])
+    num_steps, num_vertices, _ = features.shape
+    frame['NumberVertices'] = dataclasses.I3Double(num_vertices)
+    frame['NumberSteps'] = dataclasses.I3Double(num_steps)
+    frame['Offset'] = event_offset
+    event_offset += num_steps * num_vertices
+    # Concatenate the feature columns for an event over all its time steps
+    features = features.reshape((num_steps * num_vertices, -1))
     frame['CumulativeCharge'] = dataclasses.I3VectorFloat(features[:, 0])
     frame['Time'] = dataclasses.I3VectorFloat(features[:, 1])
     frame['FirstCharge'] = dataclasses.I3VectorFloat(features[:, 2])
@@ -183,6 +183,8 @@ def create_dataset(outfile, infiles):
     paths : dict
         A list of intput i3 files.
     """
+    global event_offset
+    event_offset = 0
     infiles = infiles
     tray = I3Tray()
     tray.AddModule('I3Reader',
@@ -191,7 +193,7 @@ def create_dataset(outfile, infiles):
     tray.AddModule(I3TableWriter, 'I3TableWriter', keys=[
         'NumberVertices', 'CumulativeCharge', 'Time', 'FirstCharge', 'VertexX', 'VertexY', 'VertexZ',
         'RecoX', 'RecoY', 'RecoZ', 'RecoAzimuth', 'RecoZenith', 'DeltaLLH', 'PDGEncoding', 'IC86_Dunkman_L6_SANTA_DirectCharge',
-        'InteractionType', 'NumberChannels', 'TotalCharge'], 
+        'InteractionType', 'NumberChannels', 'TotalCharge', 'Offset', 'NumberSteps'], 
                 TableService=I3HDFTableService(outfile),
                 SubEventStreams=['InIceSplit'],
                 BookEverything=False
@@ -203,5 +205,5 @@ if __name__ == '__main__':
     paths = []
     for interaction_type in ('nue', 'numu', 'nutau'):
         paths += glob('/project/6008051/hignight/dragon_3y/{0}/*'.format(interaction_type))
-    outfile = '/project/6008051/fuchsgru/data/data_dragon.hd5'
-    create_dataset(outfile, paths)
+    outfile = '/project/6008051/fuchsgru/data/data_dragon_sequential.hd5'
+    create_dataset(outfile, paths[:1])
