@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --time=12:00:00
 #SBATCH --gres=gpu:1        # request GPU "generic resource"
-#SBATCH --output=log/64_64_64_64_64_32_32_16_nobatch.out  # %N for node name, %j for jobID
+#SBATCH --output=log/data_dragon_deep.out  # %N for node name, %j for jobID
 #SBATCH --account=rpp-kenclark
 #SBATCH --mem=8G
 
@@ -12,4 +12,4 @@ module load python/3.6
 source ~/myenv/bin/activate
 #pip3 install --upgrade pip
 #pip3 install --no-index -r requirements.txt
-python3 train.py settings/hd5.json
+python3 main.py settings/hd5.json
