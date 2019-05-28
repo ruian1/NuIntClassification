@@ -10,7 +10,7 @@ class PickleDataset(Dataset):
     """ Dataset from a single pickle. """
 
     def __init__(self, path = test_data, validation_portion=0.1, test_portion=0.1, shuffle=True, 
-        interaction_types = (b'numu', b'nue', b'nutau')):
+        interaction_types = (b'numu', b'nue', b'nutau'), seed=None):
         """ Initializes the test data.
         
         Parameters:
@@ -25,6 +25,8 @@ class PickleDataset(Dataset):
             If True, the indices will be shuffled randomly.
         interaction_types : iterable
             All interaction types to be considered.
+        seed : int or None
+            The seed for the numpy shuffling.
         """
         with open(path, 'rb') as f:
             data = pickle.load(f, encoding='bytes')
@@ -44,6 +46,7 @@ class PickleDataset(Dataset):
         idx = np.arange(len(self.features))
         validation_start = int(len(self.features) * validation_portion)
         training_start = int(len(self.features) * (validation_portion + test_portion))
+        np.random.seed(seed)
         if shuffle:
             np.random.shuffle(idx)
         self.idx_test = idx[ : validation_start]

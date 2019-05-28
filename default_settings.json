@@ -11,7 +11,8 @@
             "RecoX", "RecoY", "RecoZ",
             "RecoAzimuth", "RecoZenith"
         ],
-        "max_charge" : null
+        "max_charge" : null,
+        "seed" : null
     },
     "model" : {
         "type" : "gcnn",

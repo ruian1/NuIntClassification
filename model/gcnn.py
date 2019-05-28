@@ -137,8 +137,7 @@ class AdjacencyMatrixLayer(keras.layers.Layer):
         # Using the identity: D[i, j] = (c[i] - c[j])(c[i] - c[j])^T = r[i] - 2 c[i]c[j]^T + r[j]
         # where r[i] is the squared L2 norm of the i-th coordinate
         coordinates, masks = inputs
-        coordinate_norms = tf.reduce_sum(coordinates ** 2, 2)
-        coordinate_norms = tf.expand_dims(coordinate_norms, 2)
+        coordinate_norms = tf.reduce_sum(coordinates ** 2, 2, keepdims=True)
         distances = coordinate_norms - 2 * tf.matmul(coordinates, tf.transpose(coordinates, perm=[0, 2, 1])) + tf.transpose(coordinate_norms, perm=[0, 2, 1])
         # Apply a gaussian kernel and normalize using a softmax
         A = tf.exp(-distances / (self.sigma ** 2))
@@ -183,9 +182,9 @@ def padded_vertex_mean(X, masks):
         Mean over all non-padded vertices.
     """
     vertex_masks = tf.reduce_max(masks, axis=[-1]) # Masking each vertex individually 
-    num_vertices = tf.reduce_sum(vertex_masks, axis=1) # Number of vertices per sample
+    num_vertices = tf.reduce_sum(vertex_masks, axis=1, keepdims=True) # Number of vertices per sample
     X_mean = tf.reduce_sum(X, axis=1)
-    X_mean /= tf.reshape(num_vertices, (-1, 1)) + 1e-20
+    X_mean /= num_vertices + 1e-20
     return X_mean
     
 def padded_softmax(A, masks):
@@ -204,7 +203,6 @@ def padded_softmax(A, masks):
         The masked adjacency matrices normalized using a softmax while considering padded vertices.
     """
     A = tf.nn.softmax(A, axis=2)
-    return A
     A *= masks
     normalization = tf.reduce_sum(A, axis=2, keepdims=True) + 1e-20
     return A / normalization

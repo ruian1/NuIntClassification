@@ -11,7 +11,8 @@ class HD5Dataset(Dataset):
     """ Class to iterate over an HDF5 Dataset. """
 
     def __init__(self, filepath, validation_portion=0.1, test_portion=0.1, shuffle=True, 
-        features=['CumulativeCharge', 'Time', 'FirstCharge'], coordinates=['VertexX', 'VertexY', 'VertexZ']):
+        features=['CumulativeCharge', 'Time', 'FirstCharge'], coordinates=['VertexX', 'VertexY', 'VertexZ'],
+        seed = None):
         """ Initlaizes the dataset wrapper from multiple hdf5 files, each corresponding to exactly one class label.
         
         Parameters:
@@ -28,6 +29,8 @@ class HD5Dataset(Dataset):
             A list of feature columns that must be present as children of the root of the hdf5 file.
         coordinates : list
             A list of columns that correspond to the spatial coordinates of the vertices.
+        seed : None or int  
+            The seed of the numpy shuffling if given.
         """
         super().__init__()
         self.file = h5py.File(filepath, 'r')
@@ -38,6 +41,7 @@ class HD5Dataset(Dataset):
         self.number_vertices = np.array(self.file['NumberVertices']['value'], dtype = np.int32)
         self.sample_offsets = np.cumsum(self.number_vertices) - self.number_vertices
         idx = np.arange(self.number_vertices.shape[0])
+        np.random.seed(seed)
         if shuffle:
             np.random.shuffle(idx)
         first_validation_idx = int(test_portion * idx.shape[0])
