@@ -7,7 +7,8 @@
         "shuffle" : true,
         "features" : [
             "FirstCharge", "CumulativeCharge", "Time",
-            "VertexX", "VertexY", "VertexZ"
+            "VertexX", "VertexY", "VertexZ", "RecoX",
+            "RecoZ", "RecoAzimuth", "RecoZenith"
         ],
         "max_charge" : null
     },
@@ -26,7 +27,7 @@
         "batch_size" : 128,
         "epochs" : 50,
         "checkpoint_directory" : "./training/",
-        "checkpoint_period" : 5,
+        "checkpoint_period" : 1,
         "use_class_prior" : true
     }
 }
