@@ -12,4 +12,4 @@ module load python/3.6
 source ~/myenv/bin/activate
 #pip3 install --upgrade pip
 #pip3 install --no-index -r requirements.txt
-python3 train.py settings/hd5.json
+python3 main.py settings/hd5.json
