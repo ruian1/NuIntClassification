@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --time=12:00:00
 #SBATCH --gres=gpu:1        # request GPU "generic resource"
-#SBATCH --output=log/64_64_64_64_64_32_32_16_nobatch.out  # %N for node name, %j for jobID
+#SBATCH --output=log/dragon_deep_llh.out  # %N for node name, %j for jobID
 #SBATCH --account=rpp-kenclark
 #SBATCH --mem=8G
 
