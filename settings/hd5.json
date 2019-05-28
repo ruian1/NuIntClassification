@@ -7,9 +7,7 @@
         "shuffle" : true,
         "features" : [
             "FirstCharge", "CumulativeCharge", "Time",
-            "VertexX", "VertexY", "VertexZ",
-            "RecoX", "RecoY", "RecoZ",
-            "RecoAzimuth", "RecoZenith"
+            "VertexX", "VertexY", "VertexZ"
         ],
         "max_charge" : null
     },
