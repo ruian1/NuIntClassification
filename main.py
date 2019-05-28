@@ -3,7 +3,7 @@
 import tensorflow as tf
 import tensorflow.keras as keras
 import os.path
-from model import GCNN
+from model import RGCNN
 from dataset import *
 import numpy as np
 import sys
@@ -81,10 +81,11 @@ if __name__ == '__main__':
     # Build the model
     model_type = settings['model']['type'].lower()
     if model_type == 'gcnn':
-        model = GCNN(
+        model = RGCNN(
             data.get_number_features(),
             units_graph_convolutions = settings['model']['hidden_units_graph_convolutions'],
             units_fully_connected = settings['model']['hidden_units_fully_connected'],
+            units_lstm = settings['model']['hidden_units_lstm'],
             use_batchnorm = settings['model']['use_batchnorm'],
             dropout_rate = settings['model']['dropout_rate']
         )
@@ -95,6 +96,7 @@ if __name__ == '__main__':
     # Train the model
     checkpoint_path = os.path.join(settings['training']['checkpoint_directory'], 'cp-{epoch:04d}.ckpt')
     checkpoint_dir = os.path.dirname(checkpoint_path)
+    print(f'Saving checkpoints to {checkpoint_path}')
     checkpoint_callback = keras.callbacks.ModelCheckpoint(
         checkpoint_path, verbose=1, save_weights_only=True,
         period = settings['training']['checkpoint_period']

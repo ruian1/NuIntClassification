@@ -116,7 +116,6 @@ def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-4, app
         Omkeys for the doms that were active during this event.
     """
     
-    features, coordinates, omkeys = get_events_from_frame(frame)
     coordinates, coordinate_mean, coordinate_std = normalize_coordinates(coordinates, None)
     features[:, :, 0] *= charge_scale
     features[:, :, 2] *= charge_scale
@@ -129,7 +128,8 @@ def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-4, app
     if append_coordinates_to_features:
         num_steps = features.shape[0]
         #features = np.stack((features, np.repeat(features[np.newaxis, :, :], num_steps)))
-        features = np.concatenate((features, np.repeat(coordinates[np.newaxis, :, :], num_steps)), axis=-1)
+        features = np.concatenate((features, np.repeat(coordinates[np.newaxis, :, :], num_steps, axis=0)), axis=-1)
+
     return features, coordinates, omkeys
 
 # Global variable for the offset of the event in the big table
@@ -169,6 +169,10 @@ def process_frame(frame):
     frame['RecoZ'] = dataclasses.I3VectorFloat(features[:, 5])
     frame['RecoAzimuth'] = dataclasses.I3VectorFloat(features[:, 6])
     frame['RecoZenith'] = dataclasses.I3VectorFloat(features[:, 7])
+    # Redundant saving of vertex coordinates to match each event
+    frame['PulseX'] = dataclasses.I3VectorFloat(features[:, 8])
+    frame['PulseY'] = dataclasses.I3VectorFloat(features[:, 9])
+    frame['PulseZ'] = dataclasses.I3VectorFloat(features[:, 10])
     frame['DeltaLLH'] = dataclasses.I3Double(frame['IC86_Dunkman_L6']['delta_LLH']) # Used for a baseline classifcation
     return True
 
@@ -193,7 +197,7 @@ def create_dataset(outfile, infiles):
     tray.AddModule(I3TableWriter, 'I3TableWriter', keys=[
         'NumberVertices', 'CumulativeCharge', 'Time', 'FirstCharge', 'VertexX', 'VertexY', 'VertexZ',
         'RecoX', 'RecoY', 'RecoZ', 'RecoAzimuth', 'RecoZenith', 'DeltaLLH', 'PDGEncoding', 'IC86_Dunkman_L6_SANTA_DirectCharge',
-        'InteractionType', 'NumberChannels', 'TotalCharge', 'Offset', 'NumberSteps'], 
+        'InteractionType', 'NumberChannels', 'TotalCharge', 'Offset', 'NumberSteps', 'PulseX', 'PulseY', 'PulseZ'], 
                 TableService=I3HDFTableService(outfile),
                 SubEventStreams=['InIceSplit'],
                 BookEverything=False
