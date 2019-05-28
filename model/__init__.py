@@ -1,7 +1,7 @@
-from .gcnn import *
+from .rgcnn import *
 
 __all__ = [
-    'GCNN',
+    'RGCNN',
     'GCNNBlock',
     'FeatureNormalization',
     'padded_vertex_mean',

@@ -56,27 +56,43 @@ def get_events_from_frame(frame, charge_threshold=0.5):
     
     Returns:
     --------
-    dom_features : ndarray, shape [N, 8]
+    dom_features : ndarray, shape [num_steps, N, 8]
         Feature matrix for the doms that were active during this event.
-    dom_positions : ndarray, shape [N, 3]
+    dom_positions : ndarray, shape [num_steps, N, 3]
         Coordinate matrix for the doms that were active during this event.
-    omkeys : ndarray, shape [N, 3]
+    omkeys : ndarray, shape [num_steps, N, 3]
         Omkeys for the doms that were active during this event.
     """
     track_reco = frame['IC86_Dunkman_L6_PegLeg_MultiNest8D_Track']
     x = frame['SRTTWOfflinePulsesDC']
     hits = x.apply(frame)
     
-    doms, vertices, omkeys = [], [], []
-    for omkey, pulses in hits:
-        cumulative_charge, tmin, first_charge = 0, np.inf, None
+    events, event_to_vertex, vertices, omkeys = [], [], [], []
+    for vertex_idx, (omkey, pulses) in enumerate(hits):
         dom_position = dom_positions[omkey]
+        cumulative_charge = 0
         for pulse in pulses:
             cumulative_charge += pulse.charge
             if pulse.charge >= charge_threshold:
-                tmin = min(tmin, pulse.time)
-                if first_charge is None:
-                    first_charge = pulse.charge
+                events.append(np.array([
+                    pulse.charge, pulse.time, pulse.cumulative_charge
+                ]))
+                event_to_vertex.append(vertex_idx)
+        vertices.append([dom_position[axis] for axis in ('x', 'y', 'z')])
+
+    # Sort events by their time
+    events.sort(key = lambda event: event[1])
+    
+    features = np.zeros((len(events), len(vertices), len(events[0])))
+    for idx, event in enumerate(events):
+        features[idx, event_to_vertex[idx], : ] = event
+    
+
+
+
+
+
+
         # Features:
         # Cumulative Charge per DOM, Time of first charge above threshold, First charge above threshold,
         # Reconstruction x, Reconstruction y, Reconstrucion z, Reconstruction azimuth, Reconstruction zenith
@@ -84,7 +100,6 @@ def get_events_from_frame(frame, charge_threshold=0.5):
             cumulative_charge, tmin, pulses[0].charge, track_reco.pos.x, track_reco.pos.y, 
             track_reco.pos.z, track_reco.dir.azimuth, track_reco.dir.zenith
         ])
-        vertices.append([dom_position[axis] for axis in ('x', 'y', 'z')])
         omkeys.append(omkey)
         
     return np.array(doms), np.array(vertices), np.array(omkeys)

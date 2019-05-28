@@ -39,7 +39,7 @@ class RGCNN(keras.Model):
                     hidden_dimension, 
                     dropout_rate = None if is_last_layer else dropout_rate,
                     use_activation = not is_last_layer,
-                    use_batchnorm = not is_last_layer and use_batchnorm # TODO: implement padded batchnorm
+                    use_batchnorm = False #not is_last_layer and use_batchnorm # TODO: implement padded batchnorm
                 )
             )
         
@@ -168,12 +168,13 @@ class FeatureNormalization(keras.layers.Layer):
         # TODO: add gamma and mu parameters for learnable centering and scaling
         shape_X, _ = input_shape
         self.beta = self.add_weight('beta', shape=[1, 1, 1, shape_X.as_list()[3]])
-        self.gamma = self.add_weight('gamma', shape=[1, 1, 1, shape_X.as_list()[3]])
+        #self.gamma = self.add_weight('gamma', shape=[1, 1, 1, shape_X.as_list()[3]])
 
     def call(self, inputs):
         X, masks = inputs # X is of shape [num_samples, num_vertices, num_features]
         X_mean = tf.expand_dims(padded_vertex_mean(X, masks), 2)
         X_centered = X - X_mean
+        return X_centered + self.beta
         print(X_centered.get_shape())
         X_var = padded_vertex_mean(X_centered ** 2, masks)
         X_normalized = X_centered / tf.expand_dims(tf.sqrt(X_var) + 1e-20, 2)
