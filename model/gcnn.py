@@ -37,7 +37,7 @@ class GCNN(keras.Model):
                     hidden_dimension, 
                     dropout_rate = None if is_last_layer else dropout_rate,
                     use_activation = not is_last_layer,
-                    use_batchnorm = not is_last_layer and use_batchnorm # TODO: implement padded batchnorm
+                    use_batchnorm = False#not is_last_layer and use_batchnorm # TODO: implement padded batchnorm
                 )
             )
         
@@ -141,7 +141,6 @@ class AdjacencyMatrixLayer(keras.layers.Layer):
         distances = coordinate_norms - 2 * tf.matmul(coordinates, tf.transpose(coordinates, perm=[0, 2, 1])) + tf.transpose(coordinate_norms, perm=[0, 2, 1])
         # Apply a gaussian kernel and normalize using a softmax
         A = tf.exp(-distances / (self.sigma ** 2))
-        return tf.nn.softmax(A, axis=2)
         return padded_softmax(A, masks)
 
 
