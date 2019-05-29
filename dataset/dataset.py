@@ -1,4 +1,5 @@
 import numpy as np
+from sklearn.utils import class_weight
 
 class Dataset(object):
     """ Parent class for different dataset implementations. """
@@ -33,9 +34,10 @@ class Dataset(object):
             A dict mapping from class label to float fractions.
         """
         labels, counts = np.unique(self.targets[self.idx_train], return_counts=True)
+        weights = class_weight.compute_class_weight('balanced', labels, self.targets)
         class_prior = {}
-        for label, count in zip(labels, counts):
-            class_prior[label] = count / self.idx_train.shape[0]
+        for label, weight in zip(labels, weights):
+            class_prior[label] = weight
         return class_prior
     
     def size(self, dataset='train'):
