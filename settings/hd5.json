@@ -25,7 +25,7 @@
             "accuracy"
         ],
         "learning_rate" : 1e-3,
-        "batch_size" : 16,
+        "batch_size" : 8,
         "epochs" : 5,
         "checkpoint_directory" : "./training/recurrent",
         "checkpoint_period" : 1,

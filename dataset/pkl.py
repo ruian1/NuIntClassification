@@ -1,6 +1,5 @@
 import numpy as np
 import pickle
-import tables
 from .dataset import Dataset
 
 #test_data = '../test_data/test_data.pkl'

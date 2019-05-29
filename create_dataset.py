@@ -115,7 +115,7 @@ def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-4, app
     omkeys : ndarray, shape [N, 3]
         Omkeys for the doms that were active during this event.
     """
-    
+    features, coordinates, omkeys = get_events_from_frame(frame)
     coordinates, coordinate_mean, coordinate_std = normalize_coordinates(coordinates, None)
     features[:, :, 0] *= charge_scale
     features[:, :, 2] *= charge_scale
