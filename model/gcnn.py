@@ -38,7 +38,7 @@ class GCNN(keras.Model):
                     hidden_dimension, 
                     dropout_rate = None if is_last_layer else dropout_rate,
                     use_activation = not is_last_layer,
-                    use_batchnorm = False#not is_last_layer and use_batchnorm # TODO: implement padded batchnorm
+                    use_batchnorm = False #
                 )
             )
         
