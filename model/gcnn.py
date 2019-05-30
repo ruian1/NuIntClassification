@@ -28,6 +28,7 @@ class GCNN(keras.Model):
         self.is_binary_classifier = (units_graph_convolutions + units_fully_connected)[-1] == 1
         self.adjacency_layer = AdjacencyMatrixLayer()
         self.graph_convolutions, self.fully_connecteds = [], []
+        self.number_classes = (units_graph_convolutions + units_fully_connected)[-1]
 
         # Add graph convolution blocks
         for layer_idx, hidden_dimension in enumerate(units_graph_convolutions):
@@ -74,6 +75,16 @@ class GCNN(keras.Model):
         else:
             x = keras.activations.softmax(x)
         return x
+
+    def get_num_classes(self):
+        """ Returns the number of classes the model predicts. 
+        
+        Returns:
+        --------
+        num_classes : int
+            The numer of classes / dimensionality of the last layer.
+        """
+        return self.number_classes
 
 
 class GCNNBlock(keras.layers.Layer):

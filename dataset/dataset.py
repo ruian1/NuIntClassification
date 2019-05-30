@@ -25,8 +25,8 @@ class Dataset(object):
         y_baseline = (self.delta_loglikelihood[idx] >= threshold).astype(np.float)
         return (y_true == y_baseline).sum() / y_true.shape[0]
 
-    def get_class_prior(self):
-        """ Returns the class prior, i.e. the number of samples per class for the dataset. 
+    def get_class_weights(self):
+        """ Returns a weighting to the classes.
         
         Returns:
         --------

@@ -22,6 +22,6 @@
         "epochs" : 50,
         "checkpoint_directory" : "./training/",
         "checkpoint_period" : 5,
-        "use_class_prior" : true
+        "use_class_weights" : true
     }
 }
