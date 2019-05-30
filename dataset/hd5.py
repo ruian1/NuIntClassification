@@ -39,7 +39,7 @@ class HD5Dataset(Dataset):
         # Create lookup arrays for the graph size of each sample and their offsets in the feature matrix 
         # since all the features of all graphs are stacked in one big table
         self.number_vertices = np.array(self.file['NumberVertices']['value'], dtype = np.int32)
-        self.sample_offsets = np.cumsum(self.number_vertices) - self.number_vertices
+        self.sample_offsets = np.array(self.file['Offset']['value'], dtype=np.int32)
         idx = np.arange(self.number_vertices.shape[0])
         np.random.seed(seed)
         if shuffle:
