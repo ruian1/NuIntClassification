@@ -75,13 +75,14 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-4, charge_s
     for omkey, pulses in hits:
         cumulative_charge, tmin, first_charge = 0, np.inf, None
         dom_position = dom_positions[omkey]
-        charges = [], times = []
+        charges, times = [], []
         for pulse in pulses:
             if pulse.charge >= charge_threshold:
                 charges.append(pulse.charge)
                 times.append(pulse.time)
         times = np.array(times) * time_scale
         charges = np.array(charges) * charge_scale
+        if charges.shape[0] == 0: continue # Don't use DOMs that recorded no charge above the threshold
         times -= np.average(times, weights=charges)
         time_std = np.sqrt(np.average((times)**2, weights=charges))
 
@@ -122,9 +123,8 @@ def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-4, app
     omkeys : ndarray, shape [N, 3]
         Omkeys for the doms that were active during this event.
     """
-    
-    features, coordinates, omkeys = get_events_from_frame(frame)
-    coordinates, coordinate_mean, coordinate_std = normalize_coordinates(coordinates, features[:, 0], charge_scale=charge_scale, time_scale=time_scale)
+    features, coordinates, omkeys = get_events_from_frame(frame, charge_scale=charge_scale, time_scale=time_scale)
+    coordinates, coordinate_mean, coordinate_std = normalize_coordinates(coordinates, features[:, 0])
     # Scale the origin of the track reconstruction to share the same coordinate system
     features[:, 6:9] -= coordinate_mean
     features[:, 6:9] /= coordinate_std
@@ -206,4 +206,4 @@ if __name__ == '__main__':
     for interaction_type in ('nue', 'numu', 'nutau'):
         paths += glob('/project/6008051/hignight/dragon_3y/{0}/*'.format(interaction_type))
     outfile = '/project/6008051/fuchsgru/data/data_dragon2.hd5'
-    create_dataset(outfile, paths[0])
+    create_dataset(outfile, paths)
