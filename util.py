@@ -51,6 +51,14 @@ def dataset_from_config(config):
             shuffle = config['shuffle'],
             features = config['features'],
         )
+    elif dataset_type in ('rhdf5', 'rhd5'):
+        data = RecurrentHD5Dataset(
+            config['path'],
+            validation_portion = config['validation_portion'], 
+            test_portion = config['test_portion'],
+            shuffle = config['shuffle'],
+            features = config['features'],
+        )
     else:
         raise RuntimeError(f'Unknown dataset type {dataset_type}')
     return data
@@ -72,7 +80,7 @@ def model_from_config(config, number_input_features):
     """
     model_type = config['type'].lower()
     if model_type == 'gcnn':
-        model = GCNN(
+        model = GraphConvolutionalNetwork(
             number_input_features,
             units_graph_convolutions = config['hidden_units_graph_convolutions'],
             units_fully_connected = config['hidden_units_fully_connected'],
@@ -80,6 +88,16 @@ def model_from_config(config, number_input_features):
             dropout_rate = config['dropout_rate']
         )
         num_classes = (config['hidden_units_graph_convolutions'] + config['hidden_units_fully_connected'])[-1]
+    elif model_type == 'rgcnn':
+        model = RecurrentGraphConvolutionalNetwork(
+            number_input_features,
+            units_graph_convolutions = config['hidden_units_graph_convolutions'],
+            units_fully_connected = config['hidden_units_fully_connected'],
+            units_lstm = config['hidden_units_lstm'],
+            use_batchnorm = config['use_batchnorm'],
+            dropout_rate = config['dropout_rate']
+        )
+        num_classes = (config['hidden_units_graph_convolutions'] + config['hidden_units_fully_connected'] + config['hidden_units_lstm'])[-1]
     else:
         raise RuntimeError(f'Unkown model type {model_type}')
     return model

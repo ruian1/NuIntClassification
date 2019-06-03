@@ -3,7 +3,6 @@
 import tensorflow as tf
 import tensorflow.keras as keras
 import os.path
-from model import GCNN
 from dataset import *
 import util
 import numpy as np
@@ -30,6 +29,7 @@ class LossLoggingCalback(tf.keras.callbacks.Callback):
         print(np.unique(y_pred), np.unique(y_pred).shape)
 
         baseline_accuracy = data.get_baseline_accuracy(dataset='val')
+        
         print(f'Baseline accuracy {baseline_accuracy}')
 
     def on_train_batch_end(self, batch, logs=None):

@@ -4,4 +4,5 @@ from .pkl import *
 __all__ = [
     'PickleDataset',
     'HD5Dataset',
+    'RecurrentHD5Dataset'
 ]

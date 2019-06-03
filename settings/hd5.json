@@ -14,9 +14,9 @@
     },
     "model" : {
         "type" : "gcnn",
-        "hidden_units_graph_convolutions" : [64, 64, 64, 64],
+        "hidden_units_graph_convolutions" : [64, 64, 64, 64, 64],
         "hidden_units_fully_connected" : [32, 1],
-        "use_batchnorm" : false,
+        "use_batchnorm" : true,
         "dropout_rate" : 0.3
     },
     "training" : {
@@ -25,7 +25,7 @@
         ],
         "learning_rate" : 1e-4,
         "batch_size" : 128,
-        "epochs" : 1,
+        "epochs" : 50,
         "directory" : "./training/hd5-{0}",
         "checkpoint_period" : 1,
         "use_class_weights" : true
