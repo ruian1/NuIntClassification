@@ -91,7 +91,11 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
         # Charge of first pulse, time of first pulse relative to charge weighted time mean,
         # Charge of last pulse, time of last pulse relative to charge weighted time mean,
         # Charge of the largest pulse, Time of the largest pulse relative to the charge weighted mean,
+<<<<<<< HEAD
         # Integrated charge, variance of pulse times from charge weighted time mean,
+=======
+        # Integrated charge, standard deviation of pulse times from charge weighted time mean,
+>>>>>>> 9bd4c4f33e0328e3b2fb1f92b97f1228235404b4
         # Reconstruction x, Reconstruction y, Reconstrucion z, Reconstruction azimuth, Reconstruction zenith,
         # Delta Log Likelihood (baseline)
         doms.append([
@@ -103,7 +107,11 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
         
     return np.array(doms), np.array(vertices), np.array(omkeys)
 
+<<<<<<< HEAD
 def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_to_features=False):
+=======
+def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-4, append_coordinates_to_features=False):
+>>>>>>> 9bd4c4f33e0328e3b2fb1f92b97f1228235404b4
     """ Creates normalized features from a frame.
     
     Parameters:
