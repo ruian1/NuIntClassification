@@ -73,6 +73,16 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
     x = frame['SRTTWOfflinePulsesDC']
     hits = x.apply(frame)
     
+    # First compute the charge weighted average time of the entire event
+    charges, times = [], []
+    for omkey, pulses in hits:
+        for pulse in pulses:
+            if pulse.charge >= charge_threshold:
+                charges.append(pulse.charge)
+                times.append(pulse.time)
+    average_time = np.average(times, weights=charges)
+
+    # For each event compute event features based on the pulses
     doms, vertices, omkeys = [], [], []
     for omkey, pulses in hits:
         dom_position = dom_positions[omkey]
@@ -84,7 +94,7 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
         times = np.array(times) * time_scale
         charges = np.array(charges) * charge_scale
         if charges.shape[0] == 0: continue # Don't use DOMs that recorded no charge above the threshold
-        times -= np.average(times, weights=charges)
+        times -= average_time
         time_std = np.average((times)**2, weights=charges)
 
         # Features:
@@ -102,7 +112,7 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
         omkeys.append(omkey)
         
     return np.array(doms), np.array(vertices), np.array(omkeys)
-
+    
 def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_to_features=False):
     """ Creates normalized features from a frame.
     
