@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --time=12:00:00
+#SBATCH --time=24:00:00
 #SBATCH --gres=gpu:1        # request GPU "generic resource"
 #SBATCH --output=log/data_dragon_no_convs.out  # %N for node name, %j for jobID
 #SBATCH --account=rpp-kenclark
