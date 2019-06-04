@@ -27,6 +27,8 @@ class GaussianAdjacencyMatrix(keras.layers.Layer):
         A = tf.exp(-distances / (self.sigma ** 2))
         return padded_softmax(A, masks)
 
+
+
 class GraphConvolution(keras.layers.Layer):
     """ Block that implements a graph convolution. """
 
