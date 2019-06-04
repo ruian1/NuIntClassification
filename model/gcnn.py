@@ -28,7 +28,7 @@ class GraphConvolutionalNetwork(keras.Model):
         """
         super().__init__()
         self.is_binary_classifier = (units_graph_convolutions + units_fully_connected)[-1] == 1
-        self.adjacency_layer = GaussianAdjacencyMatrix()
+        #self.adjacency_layer = GaussianAdjacencyMatrix()
         self.graph_convolutions, self.fully_connecteds = [], []
         self.number_classes = (units_graph_convolutions + units_fully_connected)[-1]
 
@@ -62,9 +62,9 @@ class GraphConvolutionalNetwork(keras.Model):
     def call(self, inputs):
         # Graph convolutions
         x, coordinates, masks = inputs
-        A = self.adjacency_layer([coordinates, masks])
+        #A = self.adjacency_layer([coordinates, masks])
         for layer in self.graph_convolutions:
-            x = layer([x, A, masks])
+            x = layer([x, coordinates, masks])
         # Average pooling of the node embeddings
         x = padded_vertex_mean(x, masks)
         # x = tf.reduce_sum(x, axis=1)

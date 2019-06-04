@@ -1,13 +1,12 @@
 {
     "dataset" : {
         "type" : "hd5",
-        "path" : "../data/data_dragon2.hd5",
+        "path" : "../data/data_dragon.hd5",
         "validation_portion" : 0.1,
         "test_portion" : 0.1,
         "shuffle" : true,
         "features" : [
-            "ChargeFirstPulse", "TimeFirstPulse", "ChargeLastPulse", "TimeLastPulse",
-            "IntegratedCharge",
+            "FirstCharge", "Time", "CumulativeCharge",
             "VertexX", "VertexY", "VertexZ"
         ],
         "max_charge" : null

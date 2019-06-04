@@ -60,7 +60,8 @@ class GraphConvolution(keras.layers.Layer):
 
     def call(self, inputs):
         inputs, A, masks = inputs
-        x = tf.matmul(A, inputs)
+        #x = tf.matmul(A, inputs)
+        x = inputs
         x = tf.concat([x, inputs], axis=-1)
         x = self.dense(x)
         if self.use_batchnorm:

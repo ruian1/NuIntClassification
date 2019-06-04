@@ -58,6 +58,7 @@ class HD5Dataset(Dataset):
         self.features = np.memmap(feature_file.name, shape=(int(self.number_vertices.sum()), len(self.feature_names)))
         for feature_idx, feature in enumerate(self.feature_names):
             self.features[:, feature_idx] = self.file.get(feature)['item']
+            print(f'Loaded feature {feature}')
         coordinate_file = tempfile.NamedTemporaryFile('w+')
         self.coordinates = np.memmap(coordinate_file.name, shape=(int(self.number_vertices.sum()), len(self.coordinate_names)))
         for coordinate_idx, coordinate in enumerate(self.coordinate_names):
