@@ -7,6 +7,7 @@ from glob import glob
 import tables
 import numpy as np
 import pickle
+from sklearn.metrics import pairwise_distances
 
 # Parses i3 files in order to create a (huge) hdf5 file that contains all events of all files
 with open('/project/6008051/fuchsgru/NuIntClassification/dom_positions.pkl', 'rb') as f:
@@ -60,7 +61,7 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-4, charge_s
     
     Returns:
     --------
-    dom_features : ndarray, shape [N, 11]
+    dom_features : ndarray, shape [N, 14]
         Feature matrix for the doms that were active during this event.
     dom_positions : ndarray, shape [N, 3]
         Coordinate matrix for the doms that were active during this event.
@@ -68,12 +69,12 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-4, charge_s
         Omkeys for the doms that were active during this event.
     """
     track_reco = frame['IC86_Dunkman_L6_PegLeg_MultiNest8D_Track']
+    delta_llh = frame['IC86_Dunkman_L6']['delta_LLH']
     x = frame['SRTTWOfflinePulsesDC']
     hits = x.apply(frame)
     
     doms, vertices, omkeys = [], [], []
     for omkey, pulses in hits:
-        cumulative_charge, tmin, first_charge = 0, np.inf, None
         dom_position = dom_positions[omkey]
         charges, times = [], []
         for pulse in pulses:
@@ -87,20 +88,22 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-4, charge_s
         time_std = np.sqrt(np.average((times)**2, weights=charges))
 
         # Features:
-        # Charge of first pulse, time of first pulse relative to charge weighted time mean
-        # Charge of last pulse, time of last pulse relative to charge weighted time mean
-        # Integrated charge, standard deviation of pulse times from charge weighted time mean
+        # Charge of first pulse, time of first pulse relative to charge weighted time mean,
+        # Charge of last pulse, time of last pulse relative to charge weighted time mean,
+        # Charge of the largest pulse, Time of the largest pulse relative to the charge weighted mean,
+        # Integrated charge, standard deviation of pulse times from charge weighted time mean,
         # Reconstruction x, Reconstruction y, Reconstrucion z, Reconstruction azimuth, Reconstruction zenith,
+        # Delta Log Likelihood (baseline)
         doms.append([
-            charges[0], times[0], charges[-1], times[-1], charges.sum(), time_std, track_reco.pos.x, track_reco.pos.y, 
-            track_reco.pos.z, track_reco.dir.azimuth, track_reco.dir.zenith
+            charges[0], times[0], charges[-1], times[-1], charges.max(), times[charges.argmax()], charges.sum(), time_std,
+            track_reco.pos.x, track_reco.pos.y, track_reco.pos.z, track_reco.dir.azimuth, track_reco.dir.zenith, delta_llh
         ])
         vertices.append([dom_position[axis] for axis in ('x', 'y', 'z')])
         omkeys.append(omkey)
         
     return np.array(doms), np.array(vertices), np.array(omkeys)
 
-def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-4, append_coordinates_to_features=True):
+def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-4, append_coordinates_to_features=False):
     """ Creates normalized features from a frame.
     
     Parameters:
@@ -116,7 +119,7 @@ def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-4, app
         
     Returns:
     --------
-    dom_features : ndarray, shape [N, 10 or 13]
+    dom_features : ndarray, shape [N, 14 or 17]
         Feature matrix for the doms that were active during this event.
     dom_positions : ndarray, shape [N, 3]
         Coordinate matrix for the doms that were active during this event. All values are in range [0, 1]
@@ -126,14 +129,15 @@ def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-4, app
     features, coordinates, omkeys = get_events_from_frame(frame, charge_scale=charge_scale, time_scale=time_scale)
     coordinates, coordinate_mean, coordinate_std = normalize_coordinates(coordinates, features[:, 0])
     # Scale the origin of the track reconstruction to share the same coordinate system
-    features[:, 6:9] -= coordinate_mean
-    features[:, 6:9] /= coordinate_std
+    features[:, 8:11] -= coordinate_mean
+    features[:, 8:11] /= coordinate_std
     
     if append_coordinates_to_features:
         features = np.hstack((features, coordinates))
     return features, coordinates, omkeys
 
 event_offset = 0
+distances_offset = 0
 
 def process_frame(frame):
     """ Callback for processing a frame and adding relevant data to the hdf5 file. 
@@ -144,6 +148,7 @@ def process_frame(frame):
         The frame to process.
     """
     global event_offset
+    global distances_offset
     # Obtain the PDG Encoding for ground truth
     frame['PDGEncoding'] = dataclasses.I3Double(
         dataclasses.get_most_energetic_neutrino(frame['I3MCTree']).pdg_encoding)
@@ -151,20 +156,28 @@ def process_frame(frame):
     frame['NumberChannels'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['NchCleaned'])
     frame['TotalCharge'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['DCFiducialPE'])
     features, coordinates, _ = get_normalized_data_from_frame(frame)
-    frame['NumberVertices'] = dataclasses.I3Double(features.shape[0])
-    frame['Offset'] = dataclasses.I3Double(event_offset)
+    # Calculate pairwise distances
+    distances = pairwise_distances(coordinates).reshape([features.shape[0] ** 2])
+    frame['NumberVertices'] = dataclasses.I3UInt64(features.shape[0])
+    frame['Offset'] = dataclasses.I3UInt64(event_offset)
+    frame['DistancesOffset'] = dataclasses.I3UInt64(distances_offset)
+    frame['Distances'] = dataclasses.I3Double(distances)
     event_offset += features.shape[0]
+    distances_offset += features.shape[0] ** 2
     frame['ChargeFirstPulse'] = dataclasses.I3VectorFloat(features[:, 0])
     frame['TimeFirstPulse'] = dataclasses.I3VectorFloat(features[:, 1])
     frame['ChargeLastPulse'] = dataclasses.I3VectorFloat(features[:, 2])
     frame['TimeLastPulse'] = dataclasses.I3VectorFloat(features[:, 3])
-    frame['IntegratedCharge'] = dataclasses.I3VectorFloat(features[:, 4])
-    frame['TimeStdDeviation'] = dataclasses.I3VectorFloat(features[:, 5])
-    frame['RecoX'] = dataclasses.I3VectorFloat(features[:, 6])
-    frame['RecoY'] = dataclasses.I3VectorFloat(features[:, 7])
-    frame['RecoZ'] = dataclasses.I3VectorFloat(features[:, 8])
-    frame['RecoAzimuth'] = dataclasses.I3VectorFloat(features[:, 9])
-    frame['RecoZenith'] = dataclasses.I3VectorFloat(features[:, 10])
+    frame['ChargeMaxPulse'] = dataclasses.I3VectorFloat(features[:, 4])
+    frame['TimeMaxPulse'] = dataclasses.I3VectorFloat(features[:, 5])
+    frame['IntegratedCharge'] = dataclasses.I3VectorFloat(features[:, 6])
+    frame['TimeStdDeviation'] = dataclasses.I3VectorFloat(features[:, 7])
+    frame['RecoX'] = dataclasses.I3VectorFloat(features[:, 8])
+    frame['RecoY'] = dataclasses.I3VectorFloat(features[:, 9])
+    frame['RecoZ'] = dataclasses.I3VectorFloat(features[:, 10])
+    frame['RecoAzimuth'] = dataclasses.I3VectorFloat(features[:, 11])
+    frame['RecoZenith'] = dataclasses.I3VectorFloat(features[:, 12])
+    frame['VertexDeltaLLH'] = dataclasses.I3Double(features[:, 13])
     frame['VertexX'] = dataclasses.I3VectorFloat(coordinates[:, 0])
     frame['VertexY'] = dataclasses.I3VectorFloat(coordinates[:, 1])
     frame['VertexZ'] = dataclasses.I3VectorFloat(coordinates[:, 2])
@@ -190,10 +203,15 @@ def create_dataset(outfile, infiles):
                 FilenameList = infiles)
     tray.AddModule(process_frame, 'process_frame')
     tray.AddModule(I3TableWriter, 'I3TableWriter', keys=[
-        'NumberVertices', 'ChargeFirstPulse', 'TimeFirstPulse', 'ChargeLastPulse', 'TimeLastPulse', 'IntegratedCharge', 'TimeStdDeviation',
-        'RecoX', 'RecoY', 'RecoZ', 'RecoAzimuth', 'RecoZenith', 
-        'VertexX', 'VertexY', 'VertexZ', 'DeltaLLH', 'PDGEncoding', 'IC86_Dunkman_L6_SANTA_DirectCharge',
-        'InteractionType', 'NumberChannels', 'TotalCharge', 'Offset'], 
+        'NumberVertices', 'ChargeFirstPulse', 'TimeFirstPulse', 'ChargeLastPulse', 'TimeLastPulse', 
+        'ChargeMaxPulse', 'TimeMaxPulse', 'IntegratedCharge', 'TimeStdDeviation', # Standard pulse attributes
+        'RecoX', 'RecoY', 'RecoZ', 'RecoAzimuth', 'RecoZenith', 'VertexDeltaLLH', # Reconstruction attributes
+        'Distances', 'DistancesOffset', # Precomputed distance matrices
+        'VertexX', 'VertexY', 'VertexZ', # Coordinates
+        'DeltaLLH', 'PDGEncoding', 'IC86_Dunkman_L6_SANTA_DirectCharge', # Metadata
+        'InteractionType', 'NumberChannels', 
+        'TotalCharge', 'Offset' # Offsets to access flattened data
+        ], 
                 TableService=I3HDFTableService(outfile),
                 SubEventStreams=['InIceSplit'],
                 BookEverything=False
@@ -206,4 +224,4 @@ if __name__ == '__main__':
     for interaction_type in ('nue', 'numu', 'nutau'):
         paths += glob('/project/6008051/hignight/dragon_3y/{0}/*'.format(interaction_type))
     outfile = '/project/6008051/fuchsgru/data/data_dragon2.hd5'
-    create_dataset(outfile, paths)
+    create_dataset(outfile, paths[:1])
