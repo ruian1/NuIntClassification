@@ -167,7 +167,7 @@ def process_frame(frame):
     frame['TotalCharge'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['DCFiducialPE'])
     features, coordinates, _ = get_normalized_data_from_frame(frame)
     # Calculate pairwise distances
-    distances = pairwise_distances(coordinates).reshape([features.shape[0] ** 2])
+    distances = pairwise_distances(coordinates).reshape(-1)
     frame['NumberVertices'] = icetray.I3Int(features.shape[0])
     frame['Offset'] = icetray.I3Int(event_offset)
     frame['DistancesOffset'] = icetray.I3Int(distances_offset)

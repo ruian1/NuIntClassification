@@ -9,7 +9,7 @@ def padded_vertex_mean(X, masks):
     Parameters:
     -----------
     X : tf.tensor, shape [K1, ..., num_vertices, num_features]
-        The tensor to calculate the mean over all vertices (axis 1).
+        The tensor to calculate the mean over all vertices (axis -2).
     masks : tf.tensor, shape [K1, ..., num_vertices, num_vertices]
         Masks for adjacency matrix of the graphs.
 

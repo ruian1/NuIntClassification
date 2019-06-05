@@ -94,7 +94,6 @@ class BatchNormalization(keras.layers.Layer):
         X, masks = inputs # X is of shape [num_samples, num_vertices, num_features]
         # Normalize over batch and vertices
         vertex_mean = tf.expand_dims(padded_vertex_mean(X, masks), -2)
-        print(vertex_mean.get_shape(), X.get_shape())
         batch_mean = tf.reduce_mean(vertex_mean, axis=0, keepdims=True)
         X_centered = X - batch_mean
         X_var = tf.expand_dims(padded_vertex_mean(X_centered ** 2, masks), -2)
