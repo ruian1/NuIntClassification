@@ -99,7 +99,7 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
         omkeys.append(omkey)
 
     # Sort events by their time
-    events.sort(key = lambda event: event[1])
+    events.sort(key = lambda event: event[2])
     events = np.array(events)
 
     # Sort vertices by their first arrival time
@@ -109,7 +109,7 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
     # [0s, 0s]
     vertices, vertex_idxs = [], {}
     for event in events:
-        vertex_idx = event[-1]
+        vertex_idx = int(event[-1])
         # Any vertex that is newly active will be inserted into the vertex array
         # and assigned a new idx (= position in the vertex array)
         if vertex_idx not in vertices_added:
@@ -127,19 +127,19 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
     events[:, 2:4] -= mean_time
 
     event_features = np.zeros((max_num_steps, len(vertices), events.shape[1] - 1))
-    active_vertex = np.zeros(max_num_steps)
+    active_vertex = np.zeros(max_num_steps, dtype=np.int)
     if len(events) <= max_num_steps:
         for idx, event in enumerate(events):
             # From the time step of the arrival of the event on it will be visible in following events
-            event_features[idx : , event[-1], : ] = event[ : -1]
-            active_vertex[idx] = event[-1] # The reordering ensured that all vertices of events before this one have a lower index 
+            event_features[idx : , int(event[-1]), : ] = event[ : -1]
+            active_vertex[idx] = int(event[-1]) # The reordering ensured that all vertices of events before this one have a lower index 
     else:
         for idx in range(max_num_steps):
             idx_from, idx_to = int(idx * len(events) / max_num_steps), int((idx + 1) * len(events) / max_num_steps)
             # Aggregate events as one time step
             for event_idx in range(idx_from, idx_to):
-                event_features[idx :, event[-1], :] = events[event_idx, : -1]
-                active_vertex[idx] = event[-1] # The reordering ensured that all vertices of events before this one have a lower index
+                event_features[idx :, int(events[event_idx, -1]), :] = events[event_idx, : -1]
+                active_vertex[idx] = int(events[event_idx, -1]) # The reordering ensured that all vertices of events before this one have a lower index
         
     return event_features, active_vertex, np.array(vertices), np.array(omkeys)
 
