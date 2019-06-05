@@ -63,10 +63,12 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
     
     Returns:
     --------
-    event_features : ndarray, shape [max_num_steps, N, 8]
+    event_features : ndarray, shape [num_steps, N, 8]
         Feature matrix for the doms that were active during this event.
-    masks : ndarray, shape [max_num_steps, N, N]
-        Precomputed adjacency masks for each graph.
+    active_vertex : ndarray, shape [num_steps]
+        Index of the vertex with greatest idx that is active during each time step.
+        The order of the vertices ensure that vertices with smaller idx are active as well.
+        Thus, this can be used to easily create the adjacency matrix mask for each graph.
     dom_positions : ndarray, shape [N, 3]
         Coordinate matrix for the doms that were active during this event.
     omkeys : ndarray, shape [num_steps, N, 3]
@@ -124,25 +126,23 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
     mean_time = np.average(events[:, 2], weights = events[:, 0])
     events[:, 2:4] -= mean_time
 
-    event_features = np.zeros((max_num_steps, len(vertices), events.shape[1] - 1))
-    masks = np.zeros((max_num_steps, len(vertices), len(vertices)), dtype=np.int)
     num_steps = min(max_num_steps, len(events))
+    event_features = np.zeros((num_steps, len(vertices), events.shape[1] - 1))
+    active_vertex = np.zeros(num_steps, dtype=np.int)
     if len(events) <= max_num_steps:
         for idx, event in enumerate(events):
             # From the time step of the arrival of the event on it will be visible in following events
             event_features[idx : , int(event[-1]), : ] = event[ : -1]
-            # The reordering ensured that all vertices of events before this one have a lower index
-            masks[idx : num_steps, : int(event[-1]), : int(event[-1])] = 1
+            active_vertex[idx] = int(event[-1]) # The reordering ensured that all vertices of events before this one have a lower index 
     else:
         for idx in range(max_num_steps):
             idx_from, idx_to = int(idx * len(events) / max_num_steps), int((idx + 1) * len(events) / max_num_steps)
             # Aggregate events as one time step
             for event_idx in range(idx_from, idx_to):
-                event = events[event_idx]
-                event_features[idx :, int(event[-1]), :] = event[ : -1]
-                masks[idx : num_steps, : int(event[-1]), : int(event[-1])] = 1
+                event_features[idx :, int(events[event_idx, -1]), :] = events[event_idx, : -1]
+                active_vertex[idx] = int(events[event_idx, -1]) # The reordering ensured that all vertices of events before this one have a lower index
         
-    return event_features, masks, np.array(vertices), np.array(omkeys)
+    return event_features, active_vertex, np.array(vertices), np.array(omkeys)
 
 def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-3, max_num_steps=64, append_coordinates_to_features=True):
     """ Creates normalized features from a frame.
@@ -162,16 +162,18 @@ def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-3, max
         
     Returns:
     --------
-    dom_features : ndarray, shape [max_num_steps, N, 9 or 12]
+    dom_features : ndarray, shape [num_steps, N, 9 or 12]
         Feature matrix for the doms that were active during this event.
-    masks : ndarray, shape [max_num_steps, N, N]
-        Precomputed adjacency masks for each graph.
+    active_vertex : ndarray, shape [num_steps]
+        Index of the vertex with greatest idx that is active during each time step.
+        The order of the vertices ensure that vertices with smaller idx are active as well.
+        Thus, this can be used to easily create the adjacency matrix mask for each graph.
     dom_positions : ndarray, shape [N, 3]
         Coordinate matrix for the doms that were active during this event. All values are in range [0, 1]
     omkeys : ndarray, shape [N, 3]
         Omkeys for the doms that were active during this event.
     """
-    features, masks, coordinates, omkeys = get_events_from_frame(frame, charge_scale=charge_scale, time_scale=time_scale, max_num_steps=max_num_steps)
+    features, active_vertex, coordinates, omkeys = get_events_from_frame(frame, charge_scale=charge_scale, time_scale=time_scale, max_num_steps=max_num_steps)
     coordinates, coordinate_mean, coordinate_std = normalize_coordinates(coordinates, None)
     # Scale the origin of the track reconstruction to share the same coordinate system
     features[:, :, 4:7] -= coordinate_mean
@@ -182,7 +184,7 @@ def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-3, max
         #features = np.stack((features, np.repeat(features[np.newaxis, :, :], num_steps)))
         features = np.concatenate((features, np.repeat(coordinates[np.newaxis, :, :], num_steps, axis=0)), axis=-1)
 
-    return features, masks, coordinates, omkeys
+    return features, active_vertex, coordinates, omkeys
 
 def process_frame(frame):
     """ Callback for processing a frame and adding relevant data to the hdf5 file. 
@@ -198,8 +200,8 @@ def process_frame(frame):
     frame['InteractionType'] = dataclasses.I3Double(frame['I3MCWeightDict']['InteractionType'])
     frame['NumberChannels'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['NchCleaned'])
     frame['TotalCharge'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['DCFiducialPE'])
-    features, masks, coordinates, _ = get_normalized_data_from_frame(frame)
-    frame['Masks'] = dataclasses.I3VectorInt(active_vertex.reshape(-1))
+    features, active_vertex, coordinates, _ = get_normalized_data_from_frame(frame)
+    frame['ActiveVertex'] = dataclasses.I3VectorInt(active_vertex.astype(np.int))
     # Compute pairwise distances
     distances = pairwise_distances(coordinates).reshape(-1)
     frame['Distances'] = dataclasses.I3VectorFloat(distances)
@@ -244,7 +246,7 @@ def create_dataset(outfile, infiles):
                 FilenameList = infiles)
     tray.AddModule(process_frame, 'process_frame')
     tray.AddModule(I3TableWriter, 'I3TableWriter', keys=[
-        'NumberVertices', 'NumberSteps', 'Distances', 'Masks', # Offset data to rebuild matrices from flattened vectors
+        'NumberVertices', 'NumberSteps', 'Distances', 'ActiveVertex', # Offset data to rebuild matrices from flattened vectors
         'Charge', 'CumulativeCharge', 'Time', 'RelativeTime', # Base features
         'RecoX', 'RecoY', 'RecoZ', 'RecoAzimuth', 'RecoZenith', # Reco features
         'PulseX', 'PulseY', 'PulseZ', # Spatial features (same shape as features, i.e. repeated over time steps)
