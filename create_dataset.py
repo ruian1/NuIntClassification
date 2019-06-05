@@ -112,7 +112,7 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
         omkeys.append(omkey)
         
     return np.array(doms), np.array(vertices), np.array(omkeys)
-    
+
 def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_to_features=False):
     """ Creates normalized features from a frame.
     
@@ -187,7 +187,7 @@ def process_frame(frame):
     frame['RecoZ'] = dataclasses.I3VectorFloat(features[:, 10])
     frame['RecoAzimuth'] = dataclasses.I3VectorFloat(features[:, 11])
     frame['RecoZenith'] = dataclasses.I3VectorFloat(features[:, 12])
-    frame['VertexDeltaLLH'] = dataclasses.I3Double(features[:, 13])
+    frame['VertexDeltaLLH'] = dataclasses.I3VectorFloat(features[:, 13])
     frame['VertexX'] = dataclasses.I3VectorFloat(coordinates[:, 0])
     frame['VertexY'] = dataclasses.I3VectorFloat(coordinates[:, 1])
     frame['VertexZ'] = dataclasses.I3VectorFloat(coordinates[:, 2])
@@ -207,7 +207,7 @@ def create_dataset(outfile, infiles):
     """
     global event_offset
     global distances_offset
-    event_offset, distances_offset = 0L
+    event_offset, distances_offset = 0L, 0L
     infiles = infiles
     tray = I3Tray()
     tray.AddModule('I3Reader',
@@ -235,4 +235,4 @@ if __name__ == '__main__':
     for interaction_type in ('nue', 'numu', 'nutau'):
         paths += glob('/project/6008051/hignight/dragon_3y/{0}/*'.format(interaction_type))
     outfile = '/project/6008051/fuchsgru/data/data_dragon3.hd5'
-    create_dataset(outfile, paths[:1])
+    create_dataset(outfile, paths)
