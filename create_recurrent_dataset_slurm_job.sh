@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH --time=24:00:00
-#SBATCH --output=log/create_dataset.log  # %N for node name, %j for jobID
+#SBATCH --time=72:00:00
+#SBATCH --output=log/create_recurrent_dataset.log  # %N for node name, %j for jobID
 #SBATCH --account=rpp-kenclark
 #SBATCH --mem=8G
 

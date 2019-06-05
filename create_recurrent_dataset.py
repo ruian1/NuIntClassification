@@ -103,7 +103,7 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
     events[:, 2:4] -= mean_time
 
 
-    event_features = np.zeros(max_num_steps, len(vertices), events.shape[1])
+    event_features = np.zeros((max_num_steps, len(vertices), events.shape[1]))
     if len(events) <= max_num_steps:
         for idx, event in enumerate(events):
             # From the time step of the arrival of the event on it will be visible in following events
@@ -142,7 +142,7 @@ def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-3, max
     omkeys : ndarray, shape [N, 3]
         Omkeys for the doms that were active during this event.
     """
-    features, coordinates, omkeys = get_events_from_frame(frame)
+    features, coordinates, omkeys = get_events_from_frame(frame, charge_scale=charge_scale, time_scale=time_scale, max_num_steps=max_num_steps)
     coordinates, coordinate_mean, coordinate_std = normalize_coordinates(coordinates, None)
     # Scale the origin of the track reconstruction to share the same coordinate system
     features[:, :, 4:7] -= coordinate_mean
@@ -167,7 +167,7 @@ def process_frame(frame):
     frame['PDGEncoding'] = dataclasses.I3Double(
         dataclasses.get_most_energetic_neutrino(frame['I3MCTree']).pdg_encoding)
     frame['InteractionType'] = dataclasses.I3Double(frame['I3MCWeightDict']['InteractionType'])
-    frame['NumberChannels'] = icetray.I3Int(frame['IC86_Dunkman_L3_Vars']['NchCleaned'])
+    frame['NumberChannels'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['NchCleaned'])
     frame['TotalCharge'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['DCFiducialPE'])
     features, coordinates, _ = get_normalized_data_from_frame(frame)
     num_steps, num_vertices, _ = features.shape
