@@ -144,9 +144,12 @@ class RecurrentHD5Dataset(Dataset):
         # Create lookup arrays for the graph size of each sample and their offsets in the feature matrix 
         # since all the features of all graphs are stacked in one big table
         self.number_vertices = np.array(self.file['NumberVertices']['value'], dtype = np.int64)
-        self.sample_offsets = np.array(self.file['Offset']['value'], dtype=np.int64)
-        self.vertex_offsets = np.cumsum(self.number_vertices) - self.number_vertices
         self.number_steps = np.array(self.file['NumberSteps']['value'], dtype=np.int64)
+        # Calculate the offsets to rebuild matrices from flattened feature vectors
+        number_rows = self.number_vertices * self.number_steps
+        self.offsets = np.cumsum(number_rows, dtype=np.int64) - number_rows
+        self.active_vertices = np.array(self.file['ActiveVertices']['item'], dtype=np.int)
+        self.active_vertices_offsets = np.cumsum(self.number_steps) - self.number_steps
         idx = np.arange(self.number_vertices.shape[0])
         if shuffle:
             np.random.shuffle(idx)
@@ -159,7 +162,6 @@ class RecurrentHD5Dataset(Dataset):
         # Create memmaps in order to access the data without iterating and shuffling in place
         feature_file = tempfile.NamedTemporaryFile('w+')
         self.features = np.memmap(feature_file.name, shape=(int((self.number_vertices * self.number_steps).sum()), len(self.feature_names)))
-        print(self.features.shape)
         for feature_idx, feature in enumerate(self.feature_names):
             self.features[:, feature_idx] = self.file.get(feature)['item']
         coordinate_file = tempfile.NamedTemporaryFile('w+')
@@ -214,7 +216,7 @@ class RecurrentHD5Dataset(Dataset):
         for idx, batch_idx in enumerate(batch_idxs):
             number_vertices = self.number_vertices[batch_idx]
             number_steps = self.number_steps[batch_idx]
-            offset = self.sample_offsets[batch_idx]
+            offset = self.offsets[batch_idx]
             vertex_offset = self.vertex_offsets[batch_idx]
             features[idx, : number_steps, : number_vertices, :] = self.features[offset : offset + (number_vertices * number_steps)].reshape(
                 (number_steps, number_vertices, -1))
