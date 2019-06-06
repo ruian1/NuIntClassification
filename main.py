@@ -70,8 +70,8 @@ if __name__ == '__main__':
         )
     logging_callback = LossLoggingCalback()
 
-    data = util.dataset_from_config(settings['dataset'])
-    model = util.model_from_config(settings['model'], data.get_number_features())    
+    data = util.dataset_from_config(settings)
+    model = util.model_from_config(settings)    
     
     optimizer = tf.keras.optimizers.Adam()
     loss = settings['training']['loss']

@@ -1,12 +1,13 @@
 {
     "dataset" : {
         "type" : "rhd5",
-        "path" : "../data/data_dragon_sequential.hd5",
+        "path" : "../data/data_dragon_sequential2.hd5",
         "validation_portion" : 0.1,
         "test_portion" : 0.1,
         "shuffle" : true,
         "features" : [
-            "CumulativeCharge", "Time", "FirstCharge"
+            "Charge", "CumulativeCharge", "Time", "RelativeTime",
+            "PulseX", "PulseY", "PulseZ"
         ],
         "max_charge" : null
     },

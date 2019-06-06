@@ -7,22 +7,43 @@ tf.enable_eager_execution()
 class GaussianAdjacencyMatrix(keras.layers.Layer):
     """ Layer that creates the adjacency matrix based on a set of euclidean coordinates. """
 
-    def __init__(self, **kwargs):
+    def __init__(self, build_distances=True, **kwargs):
+        """ Creates a layer that builds a gaussian adjacency matrix with learnable sigma.
+        
+        Parameters:
+        -----------
+        build_distances : bool
+            If true, the layer receives coordinates as inputs and builds pairwise distances.
+            If false, the layer receives precomputed pairwise distances.
+        """
         super().__init__(**kwargs)
+        self.build_distances = build_distances
 
     def build(self, input_shape):
-        shape_A, _ = input_shape
-        self.permutation = [axis for axis in range(len(shape_A.as_list()))]
+        shape_coordinates, _ = input_shape
+        self.permutation = [axis for axis in range(len(shape_coordinates.as_list()))]
         self.permutation[-1], self.permutation[-2] = self.permutation[-2], self.permutation[-1]
-        self.sigma = self.add_weight('sigma', shape=[1], constraint=keras.constraints.NonNeg()) #
+        self.sigma = self.add_weight('sigma', shape=[1]) #, constraint=keras.constraints.NonNeg()) #
         
     def call(self, inputs):
-        # Create a pairwise distance matrix D, where D[i, j] = |c[i] - c[j]|_{L2}^2
-        # Using the identity: D[i, j] = (c[i] - c[j])(c[i] - c[j])^T = r[i] - 2 c[i]c[j]^T + r[j]
-        # where r[i] is the squared L2 norm of the i-th coordinate
-        coordinates, masks = inputs
-        coordinate_norms = tf.reduce_sum(coordinates ** 2, -1, keepdims=True)
-        distances = coordinate_norms - 2 * tf.matmul(coordinates, tf.transpose(coordinates, perm=self.permutation)) + tf.transpose(coordinate_norms, perm=self.permutation)
+        """ Creates a gaussian adjacency matrix. 
+        
+        Parameters:
+        -----------
+        inputs : tuple
+            If build_distances == True, then inputs consists of
+            - coordinates : tf.tensor, shape [..., N, 3]
+            - masks : tf.tensor, shape [..., N, N]
+            else it consists of:
+            - distances : tf.tensor, shape [..., N, N]
+            - masks : tf.tensor, shape [..., N, N]
+        
+        Returns:
+        --------
+        A : tf.tensor, shape [..., N, N]
+            The adjacency matrix of the graph.
+        """
+        distances, masks = inputs
         # Apply a gaussian kernel and normalize using a softmax
         A = tf.exp(-distances / (self.sigma ** 2))
         return padded_softmax(A, masks)
@@ -62,15 +83,14 @@ class GraphConvolution(keras.layers.Layer):
 
     def call(self, inputs):
         inputs, A, masks = inputs
-        #x = tf.matmul(A, inputs)
-        x = inputs
+        x = tf.matmul(A, inputs)
         x = tf.concat([x, inputs], axis=-1)
         x = self.dense(x)
         if self.use_batchnorm:
             x = self.bn([x, masks])
         if self.use_activation:
             activated = self.activation(x)
-            x = tf.concat([x, activated], axis=-1)
+            #x = tf.concat([x, activated], axis=-1)
         if self.dropout_rate:
             x = self.dropout(x)
         return x

@@ -10,7 +10,7 @@ class GraphConvolutionalNetwork(keras.Model):
     a Gaussian kernel on the pairwise node distances. """
 
     def __init__(self, num_input_features, units_graph_convolutions = [64, 64], units_fully_connected = [32, 1], 
-        dropout_rate=0.5, use_batchnorm=True):
+        dropout_rate=0.5, use_batchnorm=True, build_distances=False):
         """ Creates a GCNN model. 
 
         Parameters:
@@ -25,10 +25,12 @@ class GraphConvolutionalNetwork(keras.Model):
             Dropout rate.
         use_batchnorm : bool
             If batch normalization should be applied.
+        build_distances : bool
+            If the network is input with coordinates and has to build the pairwise distances itself.
         """
         super().__init__()
         self.is_binary_classifier = (units_graph_convolutions + units_fully_connected)[-1] == 1
-        self.adjacency_layer = GaussianAdjacencyMatrix()
+        self.adjacency_layer = GaussianAdjacencyMatrix(build_distances=build_distances)
         self.graph_convolutions, self.fully_connecteds = [], []
         self.number_classes = (units_graph_convolutions + units_fully_connected)[-1]
 

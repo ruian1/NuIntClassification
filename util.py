@@ -35,69 +35,72 @@ def dataset_from_config(config):
     data : dataset.Dataset
         The dataset to train / test on.
     """
-    dataset_type = config['type'].lower()
+    dataset_config = config['dataset']
+    dataset_type = dataset_config['type'].lower()
     if dataset_type == 'pickle':
         data = PickleDataset(
-            path = config['path'],
-            validation_portion = config['validation_portion'], 
-            test_portion = config['test_portion'],
-            shuffle = config['shuffle']
+            path = dataset_config['path'],
+            validation_portion = dataset_config['validation_portion'], 
+            test_portion = dataset_config['test_portion'],
+            shuffle = dataset_config['shuffle']
         )
     elif dataset_type in ('hdf5', 'hd5'):
         data = HD5Dataset(
-            config['path'],
-            validation_portion = config['validation_portion'], 
-            test_portion = config['test_portion'],
-            shuffle = config['shuffle'],
-            features = config['features'],
+            dataset_config['path'],
+            validation_portion = dataset_config['validation_portion'], 
+            test_portion = dataset_config['test_portion'],
+            shuffle = dataset_config['shuffle'],
+            features = dataset_config['features'],
         )
     elif dataset_type in ('rhdf5', 'rhd5'):
         data = RecurrentHD5Dataset(
-            config['path'],
-            validation_portion = config['validation_portion'], 
-            test_portion = config['test_portion'],
-            shuffle = config['shuffle'],
-            features = config['features'],
+            dataset_config['path'],
+            validation_portion = dataset_config['validation_portion'], 
+            test_portion = dataset_config['test_portion'],
+            shuffle = dataset_config['shuffle'],
+            features = dataset_config['features'],
         )
     else:
         raise RuntimeError(f'Unknown dataset type {dataset_type}')
     return data
 
-def model_from_config(config, number_input_features):
+def model_from_config(config):
     """ Creates a model from a configuration.
     
     Parameters:
     -----------
     config : dict
         The configuration for the model.
-    num_input_features : int
-        The number of input features.
     
     Returns:
     --------
     model : keras.models.Model
         A keras model.
     """
-    model_type = config['type'].lower()
+    number_input_features = len(config['dataset']['features'])
+    model_config = config['model']
+    model_type = model_config['type'].lower()
     if model_type == 'gcnn':
         model = GraphConvolutionalNetwork(
             number_input_features,
-            units_graph_convolutions = config['hidden_units_graph_convolutions'],
-            units_fully_connected = config['hidden_units_fully_connected'],
-            use_batchnorm = config['use_batchnorm'],
-            dropout_rate = config['dropout_rate']
+            units_graph_convolutions = model_config['hidden_units_graph_convolutions'],
+            units_fully_connected = model_config['hidden_units_fully_connected'],
+            use_batchnorm = model_config['use_batchnorm'],
+            dropout_rate = model_config['dropout_rate'],
+            build_distances = not config['dataset']['distances_precomputed'],
         )
-        num_classes = (config['hidden_units_graph_convolutions'] + config['hidden_units_fully_connected'])[-1]
+        num_classes = (model_config['hidden_units_graph_convolutions'] + model_config['hidden_units_fully_connected'])[-1]
     elif model_type == 'rgcnn':
         model = RecurrentGraphConvolutionalNetwork(
             number_input_features,
-            units_graph_convolutions = config['hidden_units_graph_convolutions'],
-            units_fully_connected = config['hidden_units_fully_connected'],
-            units_lstm = config['hidden_units_lstm'],
-            use_batchnorm = config['use_batchnorm'],
-            dropout_rate = config['dropout_rate']
+            units_graph_convolutions = model_config['hidden_units_graph_convolutions'],
+            units_fully_connected = model_config['hidden_units_fully_connected'],
+            units_lstm = model_config['hidden_units_lstm'],
+            use_batchnorm = model_config['use_batchnorm'],
+            dropout_rate = model_config['dropout_rate'],
+            build_distances = not config['dataset']['distances_precomputed'],
         )
-        num_classes = (config['hidden_units_graph_convolutions'] + config['hidden_units_fully_connected'] + config['hidden_units_lstm'])[-1]
+        num_classes = (model_config['hidden_units_graph_convolutions'] + model_config['hidden_units_fully_connected'] + model_config['hidden_units_lstm'])[-1]
     else:
         raise RuntimeError(f'Unkown model type {model_type}')
     return model

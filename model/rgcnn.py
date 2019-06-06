@@ -11,7 +11,7 @@ class RecurrentGraphConvolutionalNetwork(keras.Model):
     a Gaussian kernel on the pairwise node distances. """
 
     def __init__(self, num_input_features, units_graph_convolutions = [64, 64],
-        units_lstm = [32, 16], units_fully_connected = [32, 1], dropout_rate=0.5, use_batchnorm=True):
+        units_lstm = [32, 16], units_fully_connected = [32, 1], dropout_rate=0.5, use_batchnorm=False, build_distances=False):
         """ Creates a GCNN model. 
 
         Parameters:
@@ -28,10 +28,12 @@ class RecurrentGraphConvolutionalNetwork(keras.Model):
             Dropout rate.
         use_batchnorm : bool
             If batch normalization should be applied.
+        build_distances : bool
+            If the network is input with coordinates and has to build the pairwise distances itself.
         """
         super().__init__()
         self.is_binary_classifier = (units_graph_convolutions + units_lstm  + units_fully_connected)[-1] == 1
-        self.adjacency_layer = GaussianAdjacencyMatrix()
+        self.adjacency_layer = GaussianAdjacencyMatrix(build_distances=build_distances)
         self.graph_convolutions, self.fully_connecteds, self.lstms = [], [], []
 
         # Add graph convolution blocks
@@ -50,7 +52,7 @@ class RecurrentGraphConvolutionalNetwork(keras.Model):
         for layer_idx, hidden_dimension in enumerate(units_lstm):
             is_last_layer = layer_idx == len(units_lstm) - 1
             self.lstms.append(
-                keras.layers.Bidirectional(keras.layers.LSTM(hidden_dimension, return_sequences=not is_last_layer))
+                keras.layers.Bidirectional(keras.layers.CuDNNLSTM(hidden_dimension, return_sequences=not is_last_layer))
             )
         
         # Add fully connected blocks

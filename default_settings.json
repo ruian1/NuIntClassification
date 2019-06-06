@@ -12,7 +12,8 @@
             "RecoAzimuth", "RecoZenith"
         ],
         "max_charge" : null,
-        "seed" : null
+        "seed" : null,
+        "distances_precomputed" : false
     },
     "model" : {
         "type" : "gcnn",
