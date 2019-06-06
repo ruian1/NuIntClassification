@@ -33,6 +33,7 @@
         "epochs" : 25,
         "directory" : "./hd5_{0}/",
         "checkpoint_period" : 5,
-        "use_class_weights" : true
+        "use_class_weights" : true,
+        "logfile" : null
     }
 }

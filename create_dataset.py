@@ -4,6 +4,7 @@ from icecube.hdfwriter import I3HDFWriter
 from icecube.tableio import I3TableWriter
 from icecube.hdfwriter import I3HDFTableService
 from glob import glob
+import sys
 import tables
 import numpy as np
 import pickle
@@ -165,6 +166,15 @@ def process_frame(frame):
     frame['InteractionType'] = dataclasses.I3Double(frame['I3MCWeightDict']['InteractionType'])
     frame['NumberChannels'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['NchCleaned'])
     frame['TotalCharge'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['DCFiducialPE'])
+    frame['NeutrinoEnergy'] = dataclasses.I3Double(frame['trueNeutrino'].energy)
+    frame['CascadeEnergy'] = dataclasses.I3Double(frame['trueCascade'].energy)
+    try:
+        # Appearently also frames with no primary muon contain this field, so to distinguish try to access it (which should throw an exception)
+        frame['MuonEnergy'] = dataclasses.I3Double(frame['trueMuon'].energy)
+        frame['TrackLength'] = dataclasses.I3Double(frame['trueMuon'].length)
+    except:
+        frame['MuonEnergy'] = dataclasses.I3Double(np.nan)
+        frame['TrackLength'] = dataclasses.I3Double(np.nan)
     features, coordinates, _ = get_normalized_data_from_frame(frame)
     # Calculate pairwise distances
     distances = pairwise_distances(coordinates).reshape(-1)
@@ -220,6 +230,7 @@ def create_dataset(outfile, infiles):
         'Distances', 'DistancesOffset', # Precomputed distance matrices
         'VertexX', 'VertexY', 'VertexZ', # Coordinates
         'DeltaLLH', 'PDGEncoding', 'IC86_Dunkman_L6_SANTA_DirectCharge', # Metadata
+        'NeutrinoEneregy', 'CascadeEnergy', 'MuonEnergy', 'TrackLength',
         'InteractionType', 'NumberChannels', 
         'TotalCharge', 'Offset' # Offsets to access flattened data
         ], 
