@@ -6,6 +6,7 @@ from icecube.hdfwriter import I3HDFTableService
 from glob import glob
 import tables
 import numpy as np
+import sys
 import pickle
 from sklearn.metrics import pairwise_distances
 
@@ -112,12 +113,12 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
         vertex_idx = int(event[-1])
         # Any vertex that is newly active will be inserted into the vertex array
         # and assigned a new idx (= position in the vertex array)
-        if vertex_idx not in vertices_added:
+        if vertex_idx not in vertex_idxs:
             vertex_idxs[vertex_idx] = len(vertices)
             vertices.append(vertices_unordered[vertex_idx])
         # Reassign the vertex idx (= position in the vertex array)
         event[-1] = vertex_idxs[vertex_idx]
-    assert len(vertices) == len(vertices_unordered)
+    assert len(vertices) <= len(vertices_unordered)
 
     events[1 :, 3] = events[1 :, 2] - events[ : -1, 2] # Time difference of events
     events[:, 0:2] *= charge_scale
@@ -266,6 +267,7 @@ if __name__ == '__main__':
     for interaction_type in ('nue', 'numu', 'nutau'):
         paths += glob('/project/6008051/hignight/dragon_3y/{0}/*'.format(interaction_type))
     assert(len(paths) == 1104)
+    print('Processing file ' + str(file_idx))
     outfile = '/project/6008051/fuchsgru/data/data_dragon_sequential_parts/{0}.hd5'.format(file_idx)
     create_dataset(outfile, [paths[file_idx]])
 
