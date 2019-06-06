@@ -231,8 +231,10 @@ def create_dataset(outfile, infiles):
     tray.Finish()
 
 if __name__ == '__main__':
+    file_idx = int(sys.argv[1])
     paths = []
     for interaction_type in ('nue', 'numu', 'nutau'):
         paths += glob('/project/6008051/hignight/dragon_3y/{0}/*'.format(interaction_type))
-    outfile = '/project/6008051/fuchsgru/data/data_dragon3.hd5'
-    create_dataset(outfile, paths)
+    assert(len(paths) == 1104)
+    outfile = '/project/6008051/fuchsgru/data/data_dragon3_parts/{0}.hd5'.format(file_idx)
+    create_dataset(outfile, [paths[file_idx]])
