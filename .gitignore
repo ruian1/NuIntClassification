@@ -2,6 +2,7 @@ training/*
 training
 log
 *.hd5
+settings/gcnn_grid
 
 # Standard python project gitignore
 # Byte-compiled / optimized / DLL files
