@@ -8,7 +8,7 @@ import util
 import numpy as np
 import sys
 import os.path
-import json
+import json, pickle
 import argparse
 from glob import glob
 from collections import Mapping
@@ -18,7 +18,7 @@ def log(logfile, string):
     """ Prints a string and puts into the logfile if present. """
     print(string)
     if logfile is not None:
-        logfile.write(string + '\n')
+        logfile.write(str(string) + '\n')
 
 class LossLoggingCalback(tf.keras.callbacks.Callback):
     """ Callback for logging the losses at the end of each epoch. """
@@ -26,6 +26,7 @@ class LossLoggingCalback(tf.keras.callbacks.Callback):
     def __init__(self, model, data, logfile, batch_size, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.training_history = []
+        self.validation_history = []
         self.model = model
         self.data = data
         self.logfile = logfile
@@ -39,6 +40,7 @@ class LossLoggingCalback(tf.keras.callbacks.Callback):
             self.data.get_batches(batch_size=self.batch_size, dataset='val'),
             steps=int(np.ceil(self.data.size(dataset='val') // self.batch_size))
         )
+        self.validation_history.append(metrics)
         self.log(f'Metrics: {metrics}')
         predictions = self.model.predict_generator(
             self.data.get_batches(batch_size=self.batch_size, dataset='val'),
@@ -46,6 +48,8 @@ class LossLoggingCalback(tf.keras.callbacks.Callback):
         )
         unique_predictions = np.unique(predictions).shape[0] / predictions.shape[0]
         self.log(f'Predictions: {predictions}, ({unique_predictions}% of {predictions.shape[0]} unique predictions)')
+        positives = (predictions > 0.5).sum() / predictions.shape[0]
+        self.log(f'Positive Rate: {positives}')
         baseline_accuracy = self.data.get_baseline_accuracy(dataset='val')
         self.log(f'Baseline accuracy {baseline_accuracy}')
 
@@ -123,24 +127,33 @@ if __name__ == '__main__':
         class_weight = class_weights
         )
     
-    # Evaluate on test set
-    log(logfile, '### Test dataset results:')
-    log(logfile, model.evaluate_generator(
-            data.get_batches(batch_size=batch_size, dataset='test'),
-            steps=data.size(dataset='test') // batch_size))
-    baseline_accuracy = data.get_baseline_accuracy(dataset='test')
-    log(logfile, f'Baseline accuracy {baseline_accuracy}')
-
-    # Save the model and history
+    # Save the model
     model_path = os.path.join(training_dir, 'model_weights.h5')
     model.save_weights(model_path)
     log(logfile, f'### Saved model weights to {model_path}')
 
+    # Evaluate on test set
+    log(logfile, '### Test dataset results:')
+    test_metrics = model.evaluate_generator(
+            data.get_batches(batch_size=batch_size, dataset='test'),
+            steps=data.size(dataset='test') // batch_size)
+    log(logfile, test_metrics)
+    baseline_accuracy = data.get_baseline_accuracy(dataset='test')
+    log(logfile, f'Baseline accuracy {baseline_accuracy}')
+
     # Save the history
-    history = np.array(logging_callback.training_history)
-    history_path = os.path.join(training_dir, 'history.npy')
-    np.save(history_path, logging_callback.training_history)
-    log(logfile, f'### Saved history to {history_path}')
+    history = {
+        'training' : logging_callback.training_history,
+        'validation' : logging_callback.validation_history,
+        'test' : test_metrics,
+    }
+    history_path = os.path.join(training_dir, 'history.pkl')
+    with open(history_path, 'wb') as f:
+        pickle.dump(history)
+    log(logfile, f'### Saved training history to {history_path}')
+
+    if logfile is not None:
+        logfile.close()
 
     
 

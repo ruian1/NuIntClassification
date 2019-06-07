@@ -35,8 +35,9 @@
 	},
 	"training": {
 		"learning_rate": 0.001,
-		"directory": "./hd5_{0}/",
+		"directory": "./gcnn_grid/hd5_{0}/",
 		"use_class_weights": true,
-		"logfile": "log/gcnn_grid/64-64-64-64-64-64_0.001_True_True.json.log"
+		"logfile": "log/gcnn_grid/64-64-64-64-64-64_0.001_True_True.json.log",
+		"epochs": 25
 	}
 }

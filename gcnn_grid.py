@@ -39,9 +39,10 @@ for eta in learning_rates:
                     },
                     'training' : {
                         'learning_rate' : eta,
-                        'directory' : './hd5_{0}/',
+                        'directory' : './gcnn_grid/hd5_{0}/',
                         'use_class_weights' : use_weight,
-                        'logfile' : f'log/gcnn_grid/{file_name}.log'
+                        'logfile' : f'log/gcnn_grid/{file_name}.log',
+                        'epochs' : 25,
                     }
                 }
                 with open(f'settings/gcnn_grid/{file_name}', 'w+') as f:
