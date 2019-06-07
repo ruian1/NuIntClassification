@@ -97,6 +97,7 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
                 ]))
                 time_previous_event = pulse.time
                 event_to_vertex.append(vertex_idx)
+        assert omkey not in omkeys
         omkeys.append(omkey)
 
     # Sort events by their time
@@ -228,6 +229,15 @@ def process_frame(frame):
     frame['VertexY'] = dataclasses.I3VectorFloat(coordinates[:, 1])
     frame['VertexZ'] = dataclasses.I3VectorFloat(coordinates[:, 2])
     frame['DeltaLLH'] = dataclasses.I3Double(frame['IC86_Dunkman_L6']['delta_LLH']) # Used for a baseline classifcation
+    frame['NeutrinoEnergy'] = dataclasses.I3Double(frame['trueNeutrino'].energy)
+    frame['CascadeEnergy'] = dataclasses.I3Double(frame['trueCascade'].energy)
+    try:
+        # Appearently also frames with no primary muon contain this field, so to distinguish try to access it (which should throw an exception)
+        frame['MuonEnergy'] = dataclasses.I3Double(frame['trueMuon'].energy)
+        frame['TrackLength'] = dataclasses.I3Double(frame['trueMuon'].length)
+    except:
+        frame['MuonEnergy'] = dataclasses.I3Double(np.nan)
+        frame['TrackLength'] = dataclasses.I3Double(np.nan)
     return True
 
 def create_dataset(outfile, infiles):
@@ -253,6 +263,7 @@ def create_dataset(outfile, infiles):
         'PulseX', 'PulseY', 'PulseZ', # Spatial features (same shape as features, i.e. repeated over time steps)
         'VertexX', 'VertexY', 'VertexZ', # Coordinates (not repeated over time steps)
         'DeltaLLH', 'PDGEncoding', 'IC86_Dunkman_L6_SANTA_DirectCharge', # Meta
+        'NeutrinoEneregy', 'CascadeEnergy', 'MuonEnergy', 'TrackLength',
         'InteractionType', 'NumberChannels', 'TotalCharge', ], 
                 TableService=I3HDFTableService(outfile),
                 SubEventStreams=['InIceSplit'],

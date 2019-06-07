@@ -8,6 +8,7 @@ if __name__ == '__main__':
     paths = glob(pattern)
     print(f'Found {len(paths)} files that match the pattern.')
     
+    
     dimensions = {}
     dtypes = {}
     # Calculate the dataset total size beforehand
@@ -22,6 +23,7 @@ if __name__ == '__main__':
                     assert key in dimensions, f'Dataset {path} contains key {key} which predecessor were missing.'
                     assert dtypes[key] == f[key].dtype, f'Different dtype {dtypes[key]}'
                 dimensions[key] += f[key].shape[0]
+        print(f'\rScanned file {idx} / {len(paths)}', end='\r')
     
     print(f'Got these final number of rows: {dimensions}')
 
@@ -31,8 +33,10 @@ if __name__ == '__main__':
     with h5py.File(outfile, 'w') as outfile:
         for key in dimensions:
             outfile.create_dataset(key, (dimensions[key],), dtype=dtypes[key])
-            for path in paths:
-                with h5py.File(path) as src:
+        print(f'Created output file, filling now...')
+        for path in paths:
+            with h5py.File(path) as src:
+                for key in dimensions:
                     print(f'\rCopying {key} from {path}...                             ', end='\r')
                     size = src[key].shape[0]
                     outfile[key][offsets[key] : offsets[key] + size] = src[key]
