@@ -42,7 +42,7 @@ def normalize_coordinates(coordinates, weights=None, scale=True, copy=False):
     mean = np.average(coordinates, axis=0, weights=weights).reshape((1, -1))
     coordinates -= mean
     if scale:
-        std = np.sqrt(np.average(coordinates ** 2, axis=0, weights=weights)) + 1e-20
+        std = np.sqrt(np.average(coordinates ** 2, axis=0, weights=None)) + 1e-20
         coordinates /= std
     return coordinates, mean, std
     
@@ -81,6 +81,7 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
             if pulse.charge >= charge_threshold:
                 charges.append(pulse.charge)
                 times.append(pulse.time)
+    times = np.array(times) * time_scale
     average_time = np.average(times, weights=charges)
 
     # For each event compute event features based on the pulses
@@ -96,7 +97,7 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
         charges = np.array(charges) * charge_scale
         if charges.shape[0] == 0: continue # Don't use DOMs that recorded no charge above the threshold
         times -= average_time
-        time_std = np.average((times)**2, weights=charges)
+        time_std = np.sqrt(np.average((times)**2, weights=charges))
 
         # Features:
         # Charge of first pulse, time of first pulse relative to charge weighted time mean,
@@ -110,7 +111,9 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
             track_reco.pos.x, track_reco.pos.y, track_reco.pos.z, track_reco.dir.azimuth, track_reco.dir.zenith, delta_llh
         ])
         vertices.append([dom_position[axis] for axis in ('x', 'y', 'z')])
+        assert omkey not in omkeys
         omkeys.append(omkey)
+        print(omkeys)
         
     return np.array(doms), np.array(vertices), np.array(omkeys)
 
@@ -138,7 +141,7 @@ def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-3, app
         Omkeys for the doms that were active during this event.
     """
     features, coordinates, omkeys = get_events_from_frame(frame, charge_scale=charge_scale, time_scale=time_scale)
-    coordinates, coordinate_mean, coordinate_std = normalize_coordinates(coordinates, features[:, 0])
+    coordinates, coordinate_mean, coordinate_std = normalize_coordinates(coordinates, None)
     # Scale the origin of the track reconstruction to share the same coordinate system
     features[:, 8:11] -= coordinate_mean
     features[:, 8:11] /= coordinate_std
