@@ -35,7 +35,7 @@ class HD5Dataset(Dataset):
     """ Class to iterate over an HDF5 Dataset. """
 
     def __init__(self, filepath, validation_portion=0.1, test_portion=0.1, shuffle=True, 
-        features=['CumulativeCharge', 'Time', 'FirstCharge'], seed = None, max_chunk_size=100000000):
+        features=['CumulativeCharge', 'Time', 'FirstCharge'], seed = None, max_chunk_size=10000000):
         """ Initlaizes the dataset wrapper from multiple hdf5 files, each corresponding to exactly one class label.
         
         Parameters:
