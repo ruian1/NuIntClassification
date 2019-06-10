@@ -205,9 +205,9 @@ class RecurrentHD5Dataset(Dataset):
 
     def _create_targets(self):
         """ Builds the targets for classification. """
-        interaction_type = np.array(self.file['InteractionType']['value'], dtype=np.uint8)
-        pdg_encoding = np.array(self.file['PDGEncoding']['value'], dtype=np.uint8)
-        has_track = np.logical_and(pdg_encoding == 14, interaction_type == 1)
+        interaction_type = np.array(self.file['InteractionType']['value'], dtype=np.int8)
+        pdg_encoding = np.array(self.file['PDGEncoding']['value'], dtype=np.int8)
+        has_track = np.logical_and(np.abs(pdg_encoding) == 14, interaction_type == 1)
         self.targets = has_track.astype(np.int)
 
     def get_number_features(self):
