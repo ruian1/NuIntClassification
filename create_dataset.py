@@ -113,7 +113,7 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
         vertices.append([dom_position[axis] for axis in ('x', 'y', 'z')])
         assert omkey not in omkeys
         omkeys.append(omkey)
-        print(omkeys)
+        #print(omkeys)
         
     return np.array(doms), np.array(vertices), np.array(omkeys)
 

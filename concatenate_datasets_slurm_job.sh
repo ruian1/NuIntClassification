@@ -12,4 +12,4 @@ source ~/myenv/bin/activate
 #pip3 install --upgrade pip
 #pip3 install --no-index -r requirements.txt
 #python3 main.py settings/hd5.json
-python3 concatenate_datasets.py "../data/data_dragon_sequential_parts/*.hd5" ../data/data_dragon_sequential3.hd5
+#python3 concatenate_datasets.py "../data/data_dragon_sequential_parts/*.hd5" ../data/data_dragon_sequential3.hd5
