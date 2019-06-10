@@ -1,7 +1,7 @@
 {
     "dataset" : {
         "type" : "rhd5",
-        "path" : "../data/data_dragon_sequential2.hd5",
+        "path" : "../data/data_dragon_sequential3.hd5",
         "validation_portion" : 0.1,
         "test_portion" : 0.1,
         "shuffle" : true,
@@ -13,7 +13,7 @@
     },
     "model" : {
         "type" : "rgcnn",
-        "hidden_units_graph_convolutions" : [64, 64, 64, 64],
+        "hidden_units_graph_convolutions" : [64, 64, 64, 64, 64],
         "hidden_units_lstm" : [32, 32],
         "hidden_units_fully_connected" : [1],
         "use_batchnorm" : false,
@@ -24,7 +24,7 @@
             "accuracy"
         ],
         "learning_rate" : 5e-5,
-        "batch_size" : 4,
+        "batch_size" : 32,
         "epochs" : 50,
         "directory" : "./training/rhd5-{0}",
         "checkpoint_period" : 1,

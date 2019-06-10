@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --time=24:00:00
 #SBATCH --gres=gpu:1        # request GPU "generic resource"
-#SBATCH --output=log/gcnn_grid/%a.out  # %N for node name, %j for jobID
+#SBATCH --output=log/gcnn_grid/outs/%a.out  # %N for node name, %j for jobID
 #SBATCH --account=rpp-kenclark
 #SBATCH --mem=16G
 
