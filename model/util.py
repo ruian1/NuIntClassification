@@ -43,6 +43,5 @@ def padded_softmax(A, masks, axis=-1):
     """
     A = tf.nn.softmax(A, axis=axis)
     A *= masks
-    return A
     normalization = tf.reduce_sum(A, axis=axis, keepdims=True) + 1e-20
     return A / normalization

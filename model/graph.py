@@ -46,7 +46,9 @@ class GaussianAdjacencyMatrix(keras.layers.Layer):
         distances, masks = inputs
         # Apply a gaussian kernel and normalize using a softmax
         A = tf.exp(-distances / (self.sigma ** 2))
-        return padded_softmax(A, masks)
+        A = padded_softmax(A, masks)
+        tf.print(A)
+        return A
 
 
 
@@ -73,12 +75,7 @@ class GraphConvolution(keras.layers.Layer):
         self.use_batchnorm = use_batchnorm
 
     def build(self, input_shape):
-        self.alpha = self.add_weight('alpha', shape=[1], constraint=keras.constraints.MinMaxNorm(min_value=0.0, max_value=1.0))
-        self.dense_aggregation = keras.layers.Dense(self.hidden_dim, input_shape=input_shape, 
-            use_bias=True, activation=None)
-        self.dense_representation = keras.layers.Dense(self.hidden_dim, input_shape=input_shape, 
-            use_bias=True, activation=None)
-        #self.dense = keras.layers.Dense(self.hidden_dim, input_shape=input_shape, use_bias=True)
+        self.dense = keras.layers.Dense(self.hidden_dim, input_shape=input_shape, use_bias=True)
         if self.use_batchnorm:
             self.bn = BatchNormalization()
         if self.use_activation:
@@ -88,21 +85,17 @@ class GraphConvolution(keras.layers.Layer):
 
     def call(self, inputs):
         x, A, masks = inputs
-        # Aggregate hidden representations of neighbours
-        m = tf.matmul(A, self.dense_aggregation(x))
-        v = self.dense_representation(x)
-        x = (self.alpha * m) + ((1 - self.alpha) * v)
-        #x = tf.matmul(A, inputs)
-        #x = tf.concat([x, inputs], axis=-1)
-        #x = self.dense(x)
+        hidden = self.dense(x)
+        a = tf.matmul(A, hidden)
+        a = tf.concat([a, x], axis=-1)
         if self.use_batchnorm:
-            x = self.bn([x, masks])
+            a = self.bn([a, masks])
         if self.use_activation:
-            activated = self.activation(x)
+            a = self.activation(a)
             #x = tf.concat([x, activated], axis=-1)
         if self.dropout_rate:
-            x = self.dropout(x)
-        return x
+            a = self.dropout(a)
+        return a
 
     
 class BatchNormalization(keras.layers.Layer):
