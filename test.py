@@ -5,6 +5,18 @@ from model import *
 
 tf.enable_eager_execution()
 
+X = np.random.randn(1000, 25, 8)
+A = np.abs(np.random.randn(1000, 25, 25))
+A /= A.sum(1, keepdims=True)
+M = np.ones((1000, 25, 25))
+y = (np.random.randn(1000) < 0).astype(np.int)
+
+model = GraphConvolutionalNetwork(8)
+model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
+model.fit([X, A, M], y)
+
+exit()
+
 class LossLoggingCalback(tf.keras.callbacks.Callback):
     """ Callback for logging the losses at the end of each epoch. """
 

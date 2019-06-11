@@ -73,7 +73,12 @@ class GraphConvolution(keras.layers.Layer):
         self.use_batchnorm = use_batchnorm
 
     def build(self, input_shape):
-        self.dense = keras.layers.Dense(self.hidden_dim, input_shape=input_shape, use_bias=True)
+        self.alpha = self.add_weight('alpha', shape=[1], constraint=keras.constraints.MinMaxNorm(min_value=0.0, max_value=1.0))
+        self.dense_aggregation = keras.layers.Dense(self.hidden_dim, input_shape=input_shape, 
+            use_bias=True, activation=None)
+        self.dense_representation = keras.layers.Dense(self.hidden_dim, input_shape=input_shape, 
+            use_bias=True, activation=None)
+        #self.dense = keras.layers.Dense(self.hidden_dim, input_shape=input_shape, use_bias=True)
         if self.use_batchnorm:
             self.bn = BatchNormalization()
         if self.use_activation:
@@ -82,10 +87,14 @@ class GraphConvolution(keras.layers.Layer):
             self.dropout = keras.layers.Dropout(rate=self.dropout_rate)
 
     def call(self, inputs):
-        inputs, A, masks = inputs
-        x = tf.matmul(A, inputs)
-        x = tf.concat([x, inputs], axis=-1)
-        x = self.dense(x)
+        x, A, masks = inputs
+        # Aggregate hidden representations of neighbours
+        m = tf.matmul(A, self.dense_aggregation(x))
+        v = self.dense_representation(x)
+        x = (self.alpha * m) + ((1 - self.alpha) * v)
+        #x = tf.matmul(A, inputs)
+        #x = tf.concat([x, inputs], axis=-1)
+        #x = self.dense(x)
         if self.use_batchnorm:
             x = self.bn([x, masks])
         if self.use_activation:

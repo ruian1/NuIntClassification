@@ -8,7 +8,7 @@ import tempfile
 __all__ = ['HD5Dataset', 'RecurrentHD5Dataset']
 
 
-def load_chunked(hd5file, column, memmap, chunksize):
+def load_chunked(hd5file, column, memmap, chunksize, column_idx=None):
     """ Loads a column from a hd5file into a memmep chunkwise. 
     
     Paramters:
@@ -17,10 +17,12 @@ def load_chunked(hd5file, column, memmap, chunksize):
         The hd5file to load from.
     column : str
         The column to load.
-    memmap : np.memmap
+    memmap : np.memmap, shape [N] or [N, D]
         The memory map to load the data into.
     chunksize : int
         The number of rows to transfer at once.
+    column_idx : int or None
+        The column in which to insert the data.
     """
     column = hd5file.get(column)
     steps = int(np.ceil(column.shape[0] / chunksize))
@@ -28,14 +30,17 @@ def load_chunked(hd5file, column, memmap, chunksize):
         idx_from, idx_to = step * chunksize, min((step + 1) * chunksize, column.shape[0])
         print(f'\r{step} of {steps}, slice {idx_from}:{idx_to}', end='\r')
         print('\n')
-        memmap[idx_from : idx_to] = column[idx_from : idx_to]['item']
+        if column_idx is not None:
+            memmap[idx_from : idx_to, column_idx] = column[idx_from : idx_to]['item']
+        else:
+            memmap[idx_from : idx_to] = column[idx_from : idx_to]['item']
         
 
 class HD5Dataset(Dataset):
     """ Class to iterate over an HDF5 Dataset. """
 
     def __init__(self, filepath, validation_portion=0.1, test_portion=0.1, shuffle=True, 
-        features=['CumulativeCharge', 'Time', 'FirstCharge'], seed = None, max_chunk_size=10000000):
+        features=['CumulativeCharge', 'Time', 'FirstCharge'], seed = None, max_chunk_size=50000000):
         """ Initlaizes the dataset wrapper from multiple hdf5 files, each corresponding to exactly one class label.
         
         Parameters:
@@ -83,11 +88,17 @@ class HD5Dataset(Dataset):
         feature_file = tempfile.NamedTemporaryFile('w+')
         self.features = np.memmap(feature_file.name, shape=(int(self.number_vertices.sum()), len(self.feature_names)))
         for feature_idx, feature in enumerate(self.feature_names):
-            load_chunked(self.file, feature, self.features[:, feature_idx], max_chunk_size)
+            if self.file.get(feature).shape[0] <= max_chunk_size:
+                self.features[:, feature_idx] = self.file.get(feature)['item']
+            else:
+                load_chunked(self.file, feature, self.features, max_chunk_size, column_idx=feature_idx)
             print(f'Loaded feature {feature}')
         distances_file = tempfile.NamedTemporaryFile('w+')
         self.distances = np.memmap(distances_file.name, shape=self.file['Distances'].shape)
-        load_chunked(self.file, 'Distances', self.distances, max_chunk_size)
+        if self.file['Distances'].shape[0] <= max_chunk_size:
+            self.distances[:] = self.file['Distances']['item']
+        else:
+            load_chunked(self.file, 'Distances', self.distances, max_chunk_size, column_idx=None)
         print('Created memory map arrays.')
         self._create_targets()
         self.delta_loglikelihood = np.array(self.file.get('DeltaLLH')['value'])
