@@ -13,7 +13,10 @@
         ],
         "max_charge" : null,
         "seed" : null,
-        "distances_precomputed" : false
+        "distances_precomputed" : false,
+        "balance_classes" : false,
+        "min_track_length" : null,
+        "max_cascade_energy" : null
     },
     "model" : {
         "type" : "gcnn",

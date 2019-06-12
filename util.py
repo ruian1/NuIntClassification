@@ -51,6 +51,9 @@ def dataset_from_config(config):
             test_portion = dataset_config['test_portion'],
             shuffle = dataset_config['shuffle'],
             features = dataset_config['features'],
+            balance_dataset = dataset_config['balance_classes'],
+            min_track_length= dataset_config['min_track_length'],
+            max_cascade_energy= dataset_config['max_cascade_energy'],
         )
     elif dataset_type in ('rhdf5', 'rhd5'):
         data = RecurrentHD5Dataset(
@@ -59,6 +62,9 @@ def dataset_from_config(config):
             test_portion = dataset_config['test_portion'],
             shuffle = dataset_config['shuffle'],
             features = dataset_config['features'],
+            balance_dataset = dataset_config['balance_classes'],
+            min_track_length= dataset_config['min_track_length'],
+            max_cascade_energy= dataset_config['max_cascade_energy'],
         )
     else:
         raise RuntimeError(f'Unknown dataset type {dataset_type}')

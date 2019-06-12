@@ -30,7 +30,7 @@ class GraphConvolutionalNetwork(keras.Model):
         """
         super().__init__()
         self.is_binary_classifier = (units_graph_convolutions + units_fully_connected)[-1] == 1
-        self.adjacency_layer = GaussianAdjacencyMatrix(build_distances=build_distances)
+        #self.adjacency_layer = GaussianAdjacencyMatrix(build_distances=build_distances)
         self.graph_convolutions, self.fully_connecteds = [], []
         self.number_classes = (units_graph_convolutions + units_fully_connected)[-1]
 
@@ -42,7 +42,7 @@ class GraphConvolutionalNetwork(keras.Model):
                     hidden_dimension, 
                     dropout_rate = None if is_last_layer else dropout_rate,
                     use_activation = not is_last_layer,
-                    use_batchnorm = use_batchnorm and not is_last_layer
+                    use_batchnorm = use_batchnorm and not is_last_layer,
                 )
             )
         
@@ -52,7 +52,7 @@ class GraphConvolutionalNetwork(keras.Model):
             self.fully_connecteds.append(
                 keras.layers.Dense(hidden_dimension, activation=None, use_bias=True)
             )
-            if not is_last_layer:
+            if not is_last_layer and use_batchnorm:
                 self.fully_connecteds.append(keras.layers.BatchNormalization())
             if not is_last_layer:
                 self.fully_connecteds.append(keras.layers.ReLU())
@@ -64,9 +64,10 @@ class GraphConvolutionalNetwork(keras.Model):
     def call(self, inputs):
         # Graph convolutions
         x, coordinates, masks = inputs
-        A = self.adjacency_layer([coordinates, masks])
+        #A = self.adjacency_layer([coordinates, masks])
         for layer in self.graph_convolutions:
-            x = layer([x, A, masks])
+            #x = layer([x, A, masks])
+            x = layer([x, x, masks])
         # Average pooling of the node embeddings
         x = padded_vertex_mean(x, masks)
         # x = tf.reduce_sum(x, axis=1)

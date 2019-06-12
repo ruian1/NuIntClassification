@@ -3,7 +3,8 @@ training
 log
 *.hd5
 settings/gcnn_grid
-
+memmaps
+memmaps/*
 # Standard python project gitignore
 # Byte-compiled / optimized / DLL files
 __pycache__/

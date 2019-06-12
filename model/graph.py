@@ -47,7 +47,9 @@ class GaussianAdjacencyMatrix(keras.layers.Layer):
         # Apply a gaussian kernel and normalize using a softmax
         A = tf.exp(-distances / (self.sigma ** 2))
         A = padded_softmax(A, masks)
-        tf.print(A)
+        #A = tf.Print(A, [A], 'Adjacency', summarize=100000000)
+        #A = tf.print()
+        #A = tf.Print(A, [A], 'Adjacency', summarize=100000000)
         return A
 
 
@@ -86,13 +88,15 @@ class GraphConvolution(keras.layers.Layer):
     def call(self, inputs):
         x, A, masks = inputs
         hidden = self.dense(x)
-        a = tf.matmul(A, hidden)
-        a = tf.concat([a, x], axis=-1)
+        a = hidden
+        #a = tf.matmul(A, hidden)
+        #a = tf.concat([a, x], axis=-1)
         if self.use_batchnorm:
             a = self.bn([a, masks])
         if self.use_activation:
             a = self.activation(a)
             #x = tf.concat([x, activated], axis=-1)
+        #a = tf.concat([a, x], axis=-1)
         if self.dropout_rate:
             a = self.dropout(a)
         return a

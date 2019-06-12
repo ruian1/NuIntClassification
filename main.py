@@ -23,7 +23,7 @@ def log(logfile, string):
 class LossLoggingCalback(tf.keras.callbacks.Callback):
     """ Callback for logging the losses at the end of each epoch. """
 
-    def __init__(self, model, data, logfile, batch_size, *args, **kwargs):
+    def __init__(self, model, data, logfile, batch_size, training_dir, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.training_history = []
         self.validation_history = []
@@ -31,6 +31,7 @@ class LossLoggingCalback(tf.keras.callbacks.Callback):
         self.data = data
         self.logfile = logfile
         self.batch_size = batch_size
+        self.training_dir = training_dir
 
     def log(self, string):
         log(self.logfile, string)
@@ -41,7 +42,7 @@ class LossLoggingCalback(tf.keras.callbacks.Callback):
             steps=int(np.ceil(self.data.size(dataset='val') // self.batch_size))
         )
         self.validation_history.append(metrics)
-        self.log(f'Metrics: {metrics}')
+        self.log(f'\nMetrics: {metrics}')
         predictions = self.model.predict_generator(
             self.data.get_batches(batch_size=self.batch_size, dataset='val'),
             steps=int(np.ceil(self.data.size(dataset='val') / self.batch_size))
@@ -52,12 +53,33 @@ class LossLoggingCalback(tf.keras.callbacks.Callback):
         self.log(f'Positive Rate: {positives}')
         baseline_accuracy = self.data.get_baseline_accuracy(dataset='val')
         self.log(f'Baseline accuracy {baseline_accuracy}')
+        model_path = os.path.join(self.training_dir, f'model_weights_{epoch}.h5')
+        self.model.save_weights(model_path)
+        self.log(f'### Saved model weights to {model_path}')
 
     def on_train_batch_end(self, batch, logs=None):
         if logs is not None:
             self.training_history.append([
                 logs[metric] for metric in logs
             ])
+        if batch % 500 == 0:
+            print(logs)
+            """
+            if batch % 5 == 0:
+                metrics = self.model.evaluate_generator(
+                    self.data.get_batches(batch_size=self.batch_size, dataset='val'),
+                    steps=int(np.ceil(self.data.size(dataset='val') // self.batch_size))
+                )
+                print('Validation', metrics)
+            """
+        """
+        if batch % 25 == 0:
+            names = [weight.name for layer in self.model.layers for weight in layer.weights]
+            for name, weights in zip(names, self.model.get_weights()):
+                print(name, weights.mean(), weights.std())
+        """
+        #if batch > 10000:
+        #    exit(0)
 
 
 if __name__ == '__main__':
@@ -107,9 +129,9 @@ if __name__ == '__main__':
     data = util.dataset_from_config(settings)
     model = util.model_from_config(settings)
 
-    logging_callback = LossLoggingCalback(model, data, logfile, settings['training']['batch_size'])
+    logging_callback = LossLoggingCalback(model, data, logfile, settings['training']['batch_size'], training_dir)
     
-    optimizer = tf.keras.optimizers.Adam()
+    optimizer = tf.keras.optimizers.Adam(lr=settings['training']['learning_rate'], decay=settings['training']['learning_rate'] / settings['training']['epochs'])
     loss = settings['training']['loss']
     model.compile(optimizer=optimizer, 
                 loss=loss,
@@ -118,14 +140,18 @@ if __name__ == '__main__':
         class_weights = data.get_class_weights()
     else:
         class_weights = None
+    print(f'Class weights {class_weights}')
     batch_size = settings['training']['batch_size']
     model.fit_generator(
         data.get_batches(batch_size=batch_size, dataset='train'), 
         steps_per_epoch = int(np.ceil(data.size(dataset='train') / batch_size)),
         epochs = settings['training']['epochs'],
         callbacks = [checkpoint_callback, logging_callback],
-        class_weight = class_weights
+        class_weight = class_weights,
+        #validation_data = data.get_batches(batch_size=batch_size, dataset='val'),
+        #validation_steps = int(np.ceil(data.size(dataset='val') / batch_size)),
         )
+        
     
     # Save the model
     model_path = os.path.join(training_dir, 'model_weights.h5')
@@ -149,7 +175,7 @@ if __name__ == '__main__':
     }
     history_path = os.path.join(training_dir, 'history.pkl')
     with open(history_path, 'wb') as f:
-        pickle.dump(history)
+        pickle.dump(history, f)
     log(logfile, f'### Saved training history to {history_path}')
 
     if logfile is not None:
