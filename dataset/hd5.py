@@ -5,6 +5,7 @@ from collections import defaultdict
 from .dataset import Dataset
 import tempfile
 import os
+import hashlib
 
 __all__ = ['HD5Dataset', 'RecurrentHD5Dataset']
 
@@ -71,6 +72,7 @@ class HD5Dataset(Dataset):
             Directory for memmaps.
         """
         super().__init__()
+        filepath = os.path.relpath(filepath)
         self.file = h5py.File(filepath, 'r')
         self.feature_names = features
 
@@ -88,13 +90,16 @@ class HD5Dataset(Dataset):
         self.distances_offsets = self.number_vertices ** 2
         self.distances_offsets = np.cumsum(self.distances_offsets, dtype=np.int64) - self.distances_offsets
 
+        memmap_hash = hashlib.sha1(str(self.feature_names + [filepath]).encode()).hexdigest()
+        print(f'Created sha1 hash for features and data file {memmap_hash}')
+
         # Create memmaps in order to access the data without iterating and shuffling in place
-        feature_memmap = os.path.join(memmap_directory, 'hd5_features')
+        feature_memmap = os.path.join(memmap_directory, f'hd5_features_{memmap_hash}')
         if os.path.exists(feature_memmap):
-            self.features = np.memmap(feature_memmap, shape=(int(self.number_vertices.sum()), len(self.feature_names)))
+            self.features = np.memmap(feature_memmap, shape=(int(self.number_vertices.sum()), len(self.feature_names)), dtype=np.float64)
             print(f'Loaded feature memmap {feature_memmap}.')
         else:
-            self.features = np.memmap(feature_memmap, shape=(int(self.number_vertices.sum()), len(self.feature_names)), mode='w+')
+            self.features = np.memmap(feature_memmap, shape=(int(self.number_vertices.sum()), len(self.feature_names)), mode='w+', dtype=np.float64)
             for feature_idx, feature in enumerate(self.feature_names):
                 if self.file.get(feature).shape[0] <= max_chunk_size:
                     self.features[:, feature_idx] = self.file.get(feature)['item']
@@ -102,12 +107,12 @@ class HD5Dataset(Dataset):
                     load_chunked(self.file, feature, self.features, max_chunk_size, column_idx=feature_idx)
                 print(f'Loaded feature {feature}')
             print(f'Created feature memmap {feature_memmap}')
-        distances_memmap = os.path.join(memmap_directory, 'hd5_distances')
+        distances_memmap = os.path.join(memmap_directory, f'hd5_distances_{memmap_hash}', )
         if os.path.exists(distances_memmap):
-            self.distances = np.memmap(distances_memmap, shape=self.file['Distances'].shape)
+            self.distances = np.memmap(distances_memmap, shape=self.file['Distances'].shape, dtype=np.float64)
             print(f'Created distances memmap {distances_memmap}.')
         else:
-            self.distances = np.memmap(distances_memmap, shape=self.file['Distances'].shape, mode='w+')
+            self.distances = np.memmap(distances_memmap, shape=self.file['Distances'].shape, mode='w+', dtype=np.float64)
             if self.file['Distances'].shape[0] <= max_chunk_size:
                 self.distances[:] = self.file['Distances']['item']
             else:
