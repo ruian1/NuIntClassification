@@ -110,7 +110,7 @@ if __name__ == '__main__':
     log(logfile, f'### Training according to configuration {config_path}')
 
     # Set up the directory for training and saving the model
-    model_idx = np.random.randint(1000000)
+    model_idx = np.random.randint(10000000000)
     log(logfile, f'### Generating a model id: {model_idx}')
     training_dir = settings['training']['directory'].format(model_idx)
     log(logfile, f'### Saving to {training_dir}')
@@ -126,12 +126,21 @@ if __name__ == '__main__':
             period = settings['training']['checkpoint_period']
         )
 
+    # Create a seed if non given
+    if settings['dataset']['seed'] is None:
+        settings['dataset']['seed'] = model_idx
+        print('Seeded with the model id ({model_idx}')
+
     data = util.dataset_from_config(settings)
     model = util.model_from_config(settings)
 
     logging_callback = LossLoggingCalback(model, data, logfile, settings['training']['batch_size'], training_dir)
+    lr_decay = settings['training']['learning_rate_decay']
+    if lr_decay is None:
+        lr_decay = settings['training']['learning_rate'] / settings['training']['epochs']
+        print('Using learning rate decay of {lr_decay}')
     
-    optimizer = tf.keras.optimizers.Adam(lr=settings['training']['learning_rate'], decay=settings['training']['learning_rate'] / settings['training']['epochs'])
+    optimizer = tf.keras.optimizers.Adam(lr=settings['training']['learning_rate'], decay=lr_decay)
     loss = settings['training']['loss']
     model.compile(optimizer=optimizer, 
                 loss=loss,

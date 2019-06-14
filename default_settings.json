@@ -12,11 +12,11 @@
             "RecoAzimuth", "RecoZenith"
         ],
         "max_charge" : null,
-        "seed" : null,
         "distances_precomputed" : false,
         "balance_classes" : false,
         "min_track_length" : null,
-        "max_cascade_energy" : null
+        "max_cascade_energy" : null,
+        "seed" : null
     },
     "model" : {
         "type" : "gcnn",
@@ -31,7 +31,8 @@
         "metrics" : [
             "accuracy"
         ],
-        "learning_rate" : 1e-3,
+        "learning_rate" : 1e-4,
+        "learning_rate_decay" : null,
         "batch_size" : 128,
         "epochs" : 25,
         "directory" : "./hd5_{0}/",

@@ -12,8 +12,8 @@
         ],
         "max_charge" : null,
         "balance_classes" : true,
-        "min_track_length" : 75,
-        "max_cascade_energy" : 10,
+        "min_track_length" : null,
+        "max_cascade_energy" : null,
         "distances_precomputed" : true
     },
     "model" : {
@@ -29,7 +29,7 @@
         ],
         "learning_rate" : 5e-4,
         "batch_size" : 64,
-        "epochs" : 5,
+        "epochs" : 25,
         "directory" : "./training/hd5-{0}",
         "checkpoint_period" : 5,
         "use_class_weights" : true
