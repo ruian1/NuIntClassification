@@ -45,7 +45,13 @@ def normalize_coordinates(coordinates, weights=None, scale=True, copy=False):
         std = np.sqrt(np.average(coordinates ** 2, axis=0, weights=None)) + 1e-20
         coordinates /= std
     return coordinates, mean, std
-    
+
+vertex_features = [
+    'ChargeFirstPulse', 'ChargeLastPulse', 'ChargeMaxPulse', 'TimeFirstPulse', 'TimeLastPulse', 'TimeMaxPulse',
+    'TotalCharge', 'TimeVariance'
+
+]
+
 def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_scale=1.0):
     """ Extracts data (charge and time of first arrival) as well as their positions from a frame.
     
@@ -62,17 +68,19 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
     
     Returns:
     --------
-    dom_features : ndarray, shape [N, 14]
-        Feature matrix for the doms that were active during this event.
-    dom_positions : ndarray, shape [N, 3]
+    dom_features : dict
+        A dict from features to ndarrays of shape [N,] representing the features for each vertex.
+    vertices : dict
+        A dict from coordiante axis to ndarrays of shape [N,] representing the positions for each vertex on an axis.
         Coordinate matrix for the doms that were active during this event.
     omkeys : ndarray, shape [N, 3]
         Omkeys for the doms that were active during this event.
     """
-    track_reco = frame['IC86_Dunkman_L6_PegLeg_MultiNest8D_Track']
-    delta_llh = frame['IC86_Dunkman_L6']['delta_LLH']
     x = frame['SRTTWOfflinePulsesDC']
     hits = x.apply(frame)
+
+    features = {feature : [] for feature in vertex_features}
+    vertices = {axis : [] for axis in ('x', 'y', 'z')}
     
     # First compute the charge weighted average time of the entire event
     charges, times = [], []
@@ -98,27 +106,52 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
         if charges.shape[0] == 0: continue # Don't use DOMs that recorded no charge above the threshold
         times -= average_time
         time_std = np.sqrt(np.average((times)**2, weights=charges))
-
-        # Features:
-        # Charge of first pulse, time of first pulse relative to charge weighted time mean,
-        # Charge of last pulse, time of last pulse relative to charge weighted time mean,
-        # Charge of the largest pulse, Time of the largest pulse relative to the charge weighted mean,
-        # Integrated charge, variance of pulse times from charge weighted time mean,
-        # Reconstruction x, Reconstruction y, Reconstrucion z, Reconstruction azimuth, Reconstruction zenith,
-        # Delta Log Likelihood (baseline)
-        doms.append([
-            charges[0], times[0], charges[-1], times[-1], charges.max(), times[charges.argmax()], charges.sum(), time_std,
-            track_reco.pos.x, track_reco.pos.y, track_reco.pos.z, track_reco.dir.azimuth, track_reco.dir.zenith, delta_llh
-        ])
-        vertices.append([dom_position[axis] for axis in ('x', 'y', 'z')])
+        features['ChargeFirstPulse'].append(charges[0])
+        features['ChargeLastPulse'].append(charges[-1])
+        features['ChargeMaxPulse'].append(charges.max())
+        features['TimeFirstPulse'].append(times[0])
+        features['TimeLastPulse'].append(times[1])
+        features['TimeMaxPulse'].append(times[charges.argmax()])
+        features['TimeVariance'].append(time_std)
+        features['TotalCharge'].append(charges.sum())
+        for axis in vertices:
+            vertices[axis].append(dom_position[axis])
         assert omkey not in omkeys
         omkeys.append(omkey)
         #print(omkeys)
         
-    return np.array(doms), np.array(vertices), np.array(omkeys)
+    return features, vertices, np.array(omkeys)
 
-def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_to_features=False):
-    """ Creates normalized features from a frame.
+
+def get_weight_by_flux(frame):
+    """ Calculates the weight of an event using the fluxes.
+    
+    Parameters:
+    -----------
+    frame : ?
+        The frame to process.
+    """
+    true_neutrino = dataclasses.get_most_energetic_neutrino(frame["I3MCTree"])
+    true_nu_energy  = true_neutrino.energy
+    true_nu_coszen  = np.cos(true_neutrino.dir.zenith)
+    norm = (frame["I3MCWeightDict"]['OneWeight'] / frame["I3MCWeightDict"]['NEvents']) * 2.
+    if (true_neutrino.type > 0):
+        nue_flux  = flux_service.getFlux(dataclasses.I3Particle.NuE , true_nu_energy, true_nu_coszen) * norm*0.5/0.7
+        numu_flux = flux_service.getFlux(dataclasses.I3Particle.NuMu, true_nu_energy, true_nu_coszen) * norm*0.5/0.7
+    else:
+        nue_flux  = flux_service.getFlux(dataclasses.I3Particle.NuEBar , true_nu_energy, true_nu_coszen) * norm*0.5/0.3
+        numu_flux = flux_service.getFlux(dataclasses.I3Particle.NuMuBar, true_nu_energy, true_nu_coszen) * norm*0.5/0.3
+    frame['NuMuFlux'] = dataclasses.I3VectorFloat(numu_flux)
+    frame['NueFlux'] = dataclasses.I3VectorFloat(nue_flux)
+    frame['NoFlux'] = dataclasses.I3VectorFloat(norm)
+    return True
+
+
+event_offset = 0L
+distances_offset = 0L
+
+def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_to_features=False):
+    """ Processes a frame to create an event graph and metadata out of it.
     
     Parameters:
     -----------
@@ -130,42 +163,15 @@ def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-3, app
         The normalization constant for time.
     append_coordinates_to_features : bool
         If the normalized coordinates should be appended to the feature matrix.
-        
-    Returns:
-    --------
-    dom_features : ndarray, shape [N, 14 or 17]
-        Feature matrix for the doms that were active during this event.
-    dom_positions : ndarray, shape [N, 3]
-        Coordinate matrix for the doms that were active during this event. All values are in range [0, 1]
-    omkeys : ndarray, shape [N, 3]
-        Omkeys for the doms that were active during this event.
-    """
-    features, coordinates, omkeys = get_events_from_frame(frame, charge_scale=charge_scale, time_scale=time_scale)
-    coordinates, coordinate_mean, coordinate_std = normalize_coordinates(coordinates, None)
-    # Scale the origin of the track reconstruction to share the same coordinate system
-    features[:, 8:11] -= coordinate_mean
-    features[:, 8:11] /= coordinate_std
-    
-    if append_coordinates_to_features:
-        features = np.hstack((features, coordinates))
-    return features, coordinates, omkeys
-
-event_offset = 0L
-distances_offset = 0L
-
-def process_frame(frame):
-    """ Callback for processing a frame and adding relevant data to the hdf5 file. 
-    
-    Parameters:
-    -----------
-    frame : ?
-        The frame to process.
     """
     global event_offset
     global distances_offset
+
+    ### Meta data of the event for analysis of the classifier and creation of ground truth
+    nu = dataclasses.get_most_energetic_neutrino(frame['I3MCTree'])
+
     # Obtain the PDG Encoding for ground truth
-    frame['PDGEncoding'] = dataclasses.I3Double(
-        dataclasses.get_most_energetic_neutrino(frame['I3MCTree']).pdg_encoding)
+    frame['PDGEncoding'] = dataclasses.I3Double(nu.pdg_encoding)
     frame['InteractionType'] = dataclasses.I3Double(frame['I3MCWeightDict']['InteractionType'])
     frame['NumberChannels'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['NchCleaned'])
     frame['TotalCharge'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['DCFiducialPE'])
@@ -178,33 +184,57 @@ def process_frame(frame):
     except:
         frame['MuonEnergy'] = dataclasses.I3Double(np.nan)
         frame['TrackLength'] = dataclasses.I3Double(np.nan)
-    features, coordinates, _ = get_normalized_data_from_frame(frame)
-    # Calculate pairwise distances
-    distances = pairwise_distances(coordinates).reshape(-1)
-    frame['NumberVertices'] = icetray.I3Int(features.shape[0])
-    frame['Offset'] = icetray.I3Int(event_offset)
-    frame['DistancesOffset'] = icetray.I3Int(distances_offset)
-    frame['Distances'] = dataclasses.I3VectorFloat(distances)
-    event_offset += features.shape[0]
-    distances_offset += features.shape[0] ** 2
-    frame['ChargeFirstPulse'] = dataclasses.I3VectorFloat(features[:, 0])
-    frame['TimeFirstPulse'] = dataclasses.I3VectorFloat(features[:, 1])
-    frame['ChargeLastPulse'] = dataclasses.I3VectorFloat(features[:, 2])
-    frame['TimeLastPulse'] = dataclasses.I3VectorFloat(features[:, 3])
-    frame['ChargeMaxPulse'] = dataclasses.I3VectorFloat(features[:, 4])
-    frame['TimeMaxPulse'] = dataclasses.I3VectorFloat(features[:, 5])
-    frame['IntegratedCharge'] = dataclasses.I3VectorFloat(features[:, 6])
-    frame['TimeVariance'] = dataclasses.I3VectorFloat(features[:, 7])
-    frame['RecoX'] = dataclasses.I3VectorFloat(features[:, 8])
-    frame['RecoY'] = dataclasses.I3VectorFloat(features[:, 9])
-    frame['RecoZ'] = dataclasses.I3VectorFloat(features[:, 10])
-    frame['RecoAzimuth'] = dataclasses.I3VectorFloat(features[:, 11])
-    frame['RecoZenith'] = dataclasses.I3VectorFloat(features[:, 12])
-    frame['VertexDeltaLLH'] = dataclasses.I3VectorFloat(features[:, 13])
-    frame['VertexX'] = dataclasses.I3VectorFloat(coordinates[:, 0])
-    frame['VertexY'] = dataclasses.I3VectorFloat(coordinates[:, 1])
-    frame['VertexZ'] = dataclasses.I3VectorFloat(coordinates[:, 2])
     frame['DeltaLLH'] = dataclasses.I3Double(frame['IC86_Dunkman_L6']['delta_LLH']) # Used for a baseline classifcation
+
+    ### Create features for each event 
+    features, coordinates, _ = get_events_from_frame(frame, charge_scale=charge_scale, time_scale=time_scale)
+    for feature_name, values in vertex_features.items():
+        frame[feature_name] = dataclasses.I3VectorFloat(values)
+    
+    ### Create offset lookups for the flattened feature arrays per event
+    frame['NumberVertices'] = icetray.I3Int(len(features[0]))
+    frame['Offset'] = icetray.I3Int(event_offset)
+    event_offset += len(features[0])
+
+    ### Create coordinates for each vertex
+    coordinate_matrix = np.vstack(coordinates.values())
+    C_mean_centered, C_mean, C_std = normalize_coordinates(coordinate_matrix, weights=None, copy=True)
+    C_cog_centered, C_cog, C_cog_std = normalize_coordinates(coordinate_matrix, weights=features['TotalCharge'], copy=True)
+    frame['VertexX'] = dataclasses.I3VectorFloat(C_mean_centered[:, 0])
+    frame['VertexY'] = dataclasses.I3VectorFloat(C_mean_centered[:, 1])
+    frame['VertexZ'] = dataclasses.I3VectorFloat(C_mean_centered[:, 2])
+    frame['COGShiftedVertexX'] = dataclasses.I3VectorFloat(C_cog_centered[:, 0])
+    frame['COGShiftedVertexY'] = dataclasses.I3VectorFloat(C_cog_centered[:, 1])
+    frame['COGShiftedVertexZ'] = dataclasses.I3VectorFloat(C_cog_centered[:, 2])
+
+    ### Precompute pairwise distances for each vertex and both set of 
+    distances = pairwise_distances(C_mean_centered).reshape(-1)
+    distances_cog = pairwise_distances(C_cog_centered).reshape(-1)
+    frame['Distances'] = dataclasses.I3VectorFloat(distances)
+    frame['COGDistances'] = dataclasses.I3VectorFloat(distances_cog)
+    frame['DistancesOffset'] = icetray.I3Int(distances_offset)
+    distances_offset += distances.shape[0] ** 2
+
+    ### Compute targets for possible auxilliary tasks, i.e. position and direction of the interaction
+    frame['PrimaryX'] = dataclasses.I3Double((nu.pos.x - C_mean[0]) / C_std[0])
+    frame['PrimaryY'] = dataclasses.I3Double((nu.pos.y - C_mean[1]) / C_std[1])
+    frame['PrimaryZ'] = dataclasses.I3Double((nu.pos.z - C_mean[2]) / C_std[2])
+    frame['COGPrimaryX'] = dataclasses.I3Double((nu.pos.x - C_cog[0]) / C_cog_std[0])
+    frame['COGPrimaryY'] = dataclasses.I3Double((nu.pos.y - C_cog[1]) / C_cog_std[1])
+    frame['COGPrimaryZ'] = dataclasses.I3Double((nu.pos.z - C_cog[2]) / C_cog_std[2])
+    frame['PrimaryAzimuth'] = dataclasses.I3Double(nu.dir.azimuth)
+    frame['PrimaryZenith'] = dataclasses.I3Double(nu.dir.zenith)
+
+    ### Compute possible reco inputs that apply to entire event sets
+    track_reco = frame['IC86_Dunkman_L6_PegLeg_MultiNest8D_Track']
+    frame['RecoX'] = dataclasses.I3Double((track_reco.pos.x - C_mean[0]) / C_std[0])
+    frame['RecoX'] = dataclasses.I3Double((track_reco.pos.y - C_mean[1]) / C_std[1])
+    frame['RecoX'] = dataclasses.I3Double((track_reco.pos.z - C_mean[2]) / C_std[2])
+    frame['COGRecoX'] = dataclasses.I3Double((track_reco.pos.x - C_cog[0]) / C_cog_std[0])
+    frame['COGRecoX'] = dataclasses.I3Double((track_reco.pos.x - C_cog[1]) / C_cog_std[1])
+    frame['COGRecoX'] = dataclasses.I3Double((track_reco.pos.x - C_cog[2]) / C_cog_std[2])
+    frame['RecoAzimuth'] = dataclasses.I3Double(track_reco.dir.azimuth)
+    frame['RecoZenith'] = dataclasses.I3Double(track_reco.dir.zenith)
     return True
 
 def create_dataset(outfile, infiles):
@@ -226,16 +256,25 @@ def create_dataset(outfile, infiles):
     tray.AddModule('I3Reader',
                 FilenameList = infiles)
     tray.AddModule(process_frame, 'process_frame')
-    tray.AddModule(I3TableWriter, 'I3TableWriter', keys=[
-        'NumberVertices', 'ChargeFirstPulse', 'TimeFirstPulse', 'ChargeLastPulse', 'TimeLastPulse', 
-        'ChargeMaxPulse', 'TimeMaxPulse', 'IntegratedCharge', 'TimeVariance', # Standard pulse attributes
-        'RecoX', 'RecoY', 'RecoZ', 'RecoAzimuth', 'RecoZenith', 'VertexDeltaLLH', # Reconstruction attributes
-        'Distances', 'DistancesOffset', # Precomputed distance matrices
-        'VertexX', 'VertexY', 'VertexZ', # Coordinates
-        'DeltaLLH', 'PDGEncoding', 'IC86_Dunkman_L6_SANTA_DirectCharge', # Metadata
-        'NeutrinoEneregy', 'CascadeEnergy', 'MuonEnergy', 'TrackLength',
-        'InteractionType', 'NumberChannels', 
-        'TotalCharge', 'Offset' # Offsets to access flattened data
+    tray.AddModule(get_weight_by_flux, 'get_weight_by_flux')
+    tray.AddModule(I3TableWriter, 'I3TableWriter', keys = vertex_features + [
+        # Meta data
+        'PGDEncoding', 'Interaction', 'NumberChannels', 'NeutrinoEnergy', 
+        'CascadeEnergy', 'MuonEnergy', 'TrackLength', 'DeltaLLH',
+        # Lookups
+        'NumberVertices', 'Offsets',
+        # Coordinates and pairwise distances
+        'VertexX', 'VertexY', 'VertexZ', 'COGShiftedVertexX', 
+        'COGShiftedVertexY', 'COGShiftedVertexZ', 'Distances',
+        'COGDistances', 'DistancesOffset',
+        # Auxilliary targets
+        'PrimaryX', 'PrimaryY', 'PrimaryZ', 'COGPrimaryX', 'COGPrimaryY', 
+        'COGPrimaryZ', 'PrimaryAzimuth', 'PrimaryZenith',
+        # Reconstruction
+        'RecoX', 'RecoY', 'RecoZ', 'COGRecoX', 'COGRecoY', 'COGRecoX',
+        'RecoAzimuth', 'RecoZenith',
+        # Flux weights
+        'NuMuFlux', 'NueFlux', 'NoFlux',
         ], 
                 TableService=I3HDFTableService(outfile),
                 SubEventStreams=['InIceSplit'],

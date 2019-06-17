@@ -11,7 +11,7 @@
             "VertexX", "VertexY", "VertexZ"
         ],
         "max_charge" : null,
-        "balance_classes" : true,
+        "balance_classes" : false,
         "min_track_length" : null,
         "max_cascade_energy" : null,
         "distances_precomputed" : true
