@@ -112,7 +112,7 @@ class Dataset(object):
         # Loop over the dataset
         while True:
             for idx in range(0, idxs.shape[0], batch_size):
-                batch_idxs = idxs[idx : min(len(self.idx_train), idx + batch_size)]
+                batch_idxs = idxs[idx : idx + batch_size]
                 features, coordinates, masks = self.get_padded_batch(batch_idxs)
                 targets = self.targets[batch_idxs]
                 yield [features, coordinates, masks], targets
