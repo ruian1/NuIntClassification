@@ -48,7 +48,8 @@ def normalize_coordinates(coordinates, weights=None, scale=True, copy=False):
 
 vertex_features = [
     'ChargeFirstPulse', 'ChargeLastPulse', 'ChargeMaxPulse', 'TimeFirstPulse', 'TimeLastPulse', 'TimeMaxPulse',
-    'TotalCharge', 'TimeVariance'
+    'TotalCharge', 'TimeStd',  'TimeFirstPulseShifted', 'TimeLastPulseShifted', 'TimeMaxPulseShifted',
+    'TotalChargeShifted', 'TimeStdShifted', 
 
 ]
 
@@ -78,6 +79,8 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
     """
     x = frame['SRTTWOfflinePulsesDC']
     hits = x.apply(frame)
+    track_reco = frame['IC86_Dunkman_L6_PegLeg_MultiNest8D_Track']
+    track_reco.shape = dataclasses.I3Particle.InfiniteTrack
 
     features = {feature : [] for feature in vertex_features}
     vertices = {axis : [] for axis in ('x', 'y', 'z')}
@@ -96,24 +99,37 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
     doms, vertices, omkeys = [], [], []
     for omkey, pulses in hits:
         dom_position = dom_positions[omkey]
-        charges, times = [], []
+        charges, times, times_shifted = [], [], []
+        # Calculate the expected time of the charge at the DOM assuming a correct track reconstruction
+        cherenkov_time = phys_services.I3Calculator.cherenkov_time(
+            frame['IC86_Dunkman_L6_PegLeg_MultiNest8D_Track'],
+            dataclasses.I3Position(dom_position['x'], dom_position['y'], dom_position['z']))
+        expected_time = cherenkov_time + track_reco.time
         for pulse in pulses:
             if pulse.charge >= charge_threshold:
                 charges.append(pulse.charge)
                 times.append(pulse.time)
+                times_shifted.append(pulse.time - expected_time)
         times = np.array(times) * time_scale
+        times_shifted = np.array(times_shifted) * time_scale
         charges = np.array(charges) * charge_scale
         if charges.shape[0] == 0: continue # Don't use DOMs that recorded no charge above the threshold
         times -= average_time
         time_std = np.sqrt(np.average((times)**2, weights=charges))
+        time_std_shifted = np.sqrt(np.average((times_shifted)**2, weights=charges))
         features['ChargeFirstPulse'].append(charges[0])
         features['ChargeLastPulse'].append(charges[-1])
         features['ChargeMaxPulse'].append(charges.max())
         features['TimeFirstPulse'].append(times[0])
-        features['TimeLastPulse'].append(times[1])
+        features['TimeLastPulse'].append(times[-1])
         features['TimeMaxPulse'].append(times[charges.argmax()])
-        features['TimeVariance'].append(time_std)
+        features['TimeStd'].append(time_std)
+        features['TimeFirstPulseShifted'].append(times_shifted[0])
+        features['TimeLastPulseShifted'].append(times_shifted[-1])
+        features['TimeMaxPulseShifted'].append(times_shifted[charges.argmax()])
+        features['TimeStdShifted'].append(time_std_shifted)
         features['TotalCharge'].append(charges.sum())
+
         for axis in vertices:
             vertices[axis].append(dom_position[axis])
         assert omkey not in omkeys

@@ -116,6 +116,11 @@ if __name__ == '__main__':
     log(logfile, f'### Saving to {training_dir}')
     os.makedirs(training_dir, exist_ok=True)
 
+    # Create a seed if non given
+    if settings['dataset']['seed'] is None:
+        settings['dataset']['seed'] = model_idx
+        print('Seeded with the model id ({model_idx}')
+
     # Save a copy of the settings
     with open(os.path.join(training_dir, 'config.json'), 'w+') as f:
         json.dump(settings, f)
@@ -126,11 +131,6 @@ if __name__ == '__main__':
             period = settings['training']['checkpoint_period']
         )
 
-    # Create a seed if non given
-    if settings['dataset']['seed'] is None:
-        settings['dataset']['seed'] = model_idx
-        print('Seeded with the model id ({model_idx}')
-
     data = util.dataset_from_config(settings)
     model = util.model_from_config(settings)
 
@@ -138,7 +138,7 @@ if __name__ == '__main__':
     lr_decay = settings['training']['learning_rate_decay']
     if lr_decay is None:
         lr_decay = settings['training']['learning_rate'] / settings['training']['epochs']
-        print('Using learning rate decay of {lr_decay}')
+        print(f'Using learning rate decay of {lr_decay}')
     
     optimizer = tf.keras.optimizers.Adam(lr=settings['training']['learning_rate'], decay=lr_decay)
     loss = settings['training']['loss']
