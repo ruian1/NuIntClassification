@@ -42,7 +42,8 @@ class HD5Dataset(Dataset):
     """ Class to iterate over an HDF5 Dataset. """
 
     def __init__(self, filepath, validation_portion=0.1, test_portion=0.1, shuffle=True, 
-        features=['CumulativeCharge', 'Time', 'FirstCharge'], seed = None, max_chunk_size=50000000, balance_dataset=False,
+        features=['CumulativeCharge', 'Time', 'FirstCharge'], graph_features=None, 
+        seed = None, max_chunk_size=50000000, balance_dataset=False,
         min_track_length=None, max_cascade_energy=None, memmap_directory='./memmaps'):
         """ Initlaizes the dataset wrapper from multiple hdf5 files, each corresponding to exactly one class label.
         
@@ -58,6 +59,8 @@ class HD5Dataset(Dataset):
             If True, the data will be shuffled randomly.
         features : list
             A list of feature columns that must be present as children of the root of the hdf5 file.
+        graph_features : list or None
+            A list of feature columns for each graph (instead of vertex features) that must be present as children of the root of the hdf5 file.
         seed : None or int  
             The seed of the numpy shuffling if given.
         max_cunk_size : int
@@ -73,8 +76,10 @@ class HD5Dataset(Dataset):
         """
         super().__init__()
         filepath = os.path.relpath(filepath)
+        os.makedirs(os.path.dirname(memmap_directory), exist_ok=True)
         self.file = h5py.File(filepath, 'r')
         self.feature_names = features
+        self.graph_feature_names = graph_features
 
         self._create_targets()
         filters = event_filter(self.file, min_track_length=min_track_length, max_cascade_energy=max_cascade_energy)
@@ -110,7 +115,7 @@ class HD5Dataset(Dataset):
         distances_memmap = os.path.join(memmap_directory, f'hd5_distances_{memmap_hash}', )
         if os.path.exists(distances_memmap):
             self.distances = np.memmap(distances_memmap, shape=self.file['Distances'].shape, dtype=np.float64)
-            print(f'Created distances memmap {distances_memmap}.')
+            print(f'Loaded distances memmap {distances_memmap}.')
         else:
             self.distances = np.memmap(distances_memmap, shape=self.file['Distances'].shape, mode='w+', dtype=np.float64)
             if self.file['Distances'].shape[0] <= max_chunk_size:
@@ -118,6 +123,22 @@ class HD5Dataset(Dataset):
             else:
                 load_chunked(self.file, 'Distances', self.distances, max_chunk_size, column_idx=None)
             print(f'Created distances memmap {distances_memmap}.')
+        if self.graph_feature_names is not None:
+            graph_feature_memmap = os.path.join(memmap_directory, f'hd5_graph_features_{memmap_hash}')
+            if os.path.exists(graph_feature_memmap):
+                self.graph_features = np.memmap(graph_feature_memmap, shape=(self.number_vertices.shape[0], len(self.graph_feature_names)), 
+                    dtype=np.float64)
+                print(f'Loaded graph feature memmap {graph_feature_memmap}')
+            else:
+                self.graph_features = np.memmap(graph_feature_memmap, shape=(self.number_vertices.shape[0], len(self.graph_feature_names)), 
+                    mode='w+', dtype=np.float64)
+                for feature_idx, feature in enumerate(self.graph_feature_names):
+                    if self.file.get(feature).shape[0] <= max_chunk_size:
+                        self.graph_features[:, feature_idx] = self.file.get(feature)['value']
+                    else:
+                        load_chunked(self.file, feature, self.graph_features, max_chunk_size, column_idx=feature_idx)
+                    print(f'Loaded graph feature {feature}')
+                print(f'Created graph feature memmap {graph_feature_memmap}')
         self.delta_loglikelihood = np.array(self.file.get('DeltaLLH')['value'])
 
     def _create_targets(self):
@@ -137,6 +158,19 @@ class HD5Dataset(Dataset):
         """
         return len(self.feature_names)
 
+    def get_number_graph_features(self):
+        """ Returns the number of graph features in the dataset. 
+        
+        Returns:
+        --------
+        num_features : int
+            The number of graph features.
+        """
+        if self.graph_feature_names is not None:
+            return len(self.graph_feature_names)
+        else:
+            raise RuntimeError('Dataset has no graph features.')
+
     def get_padded_batch(self, batch_idxs):
         """ Pads a batch with zeros and creats a mask.
         
@@ -149,6 +183,8 @@ class HD5Dataset(Dataset):
         --------
         features : ndarray, shape [batch_size, N_max, D]
             The feature matrices in the batch.
+        graph_features : ndarray, shape [batch_size, F]
+            Optional: If graph features are given, the features for each graph.
         distances : ndarray, shape [batch_size, N_max, N_max]
             Precomputed pairwise distances for each graph.
         masks : ndarray, shape [batch_size, N_max, N_max]
@@ -167,7 +203,10 @@ class HD5Dataset(Dataset):
             distances[idx, : number_vertices, : number_vertices] = \
                 self.distances[distances_offset : distances_offset + number_vertices ** 2].reshape((number_vertices, number_vertices))
             masks[idx, : number_vertices, : number_vertices] = 1
-        return features, distances, masks
+        if self.graph_feature_names is not None:
+            return features, self.graph_features[[batch_idxs], :], distances, masks
+        else:
+            return features, distances, masks
 
 
 class RecurrentHD5Dataset(Dataset):

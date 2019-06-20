@@ -65,16 +65,19 @@ model = tf.keras.Sequential(layers=[
 model = RecurrentGraphConvolutionalNetwork(3, units_graph_convolutions=[64, 64], units_fully_connected=[16, 1], units_lstm=[16, 16])
 """
 
-n = 5000
+n = 10000
 
 X = np.random.randn(n, 25, 5)
+F = np.random.randn(n, 10)
 A = np.random.randn(n, 25, 25)
 M = np.zeros([n, 25, 25])
 M[:, :15, :15] = 1
 y = (np.random.randn(n) > 0).astype(np.int)
 X[y > 0] = np.abs(X[y > 0])
 X[y <= 0] = -np.abs(X[y <= 0])
-model = GraphConvolutionalNetwork(5, use_batchnorm=False)
+F[y > 0] = np.abs(F[y > 0])
+F[y < 0] = -np.abs(F[y < 0])
+model = GraphConvolutionalNetwork(5, units_graph_features=[64, 64], use_batchnorm=False)
 
 optimizer = tf.keras.optimizers.Adam(lr=1e-4)
 loss = 'binary_crossentropy'
@@ -90,5 +93,5 @@ model.fit_generator(
         class_weight = data.get_class_weights()
         )
 """
-model.fit(x=[X, A, M], y=y, epochs=20)
+model.fit(x=[X, F, A, M], y=y, epochs=20, validation_split=0.1)
 #model.fit(x=X, y=y, epochs=20, batch_size=32)
