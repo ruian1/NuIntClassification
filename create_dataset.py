@@ -9,10 +9,13 @@ import tables
 import numpy as np
 import pickle
 from sklearn.metrics import pairwise_distances
+from icecube import NuFlux # genie_icetray
 
 # Parses i3 files in order to create a (huge) hdf5 file that contains all events of all files
 with open('/project/6008051/fuchsgru/NuIntClassification/dom_positions.pkl', 'rb') as f:
     dom_positions = pickle.load(f)
+
+flux_service  = NuFlux.makeFlux("IPhonda2014_spl_solmin")
 
 def normalize_coordinates(coordinates, weights=None, scale=True, copy=False):
     """ Normalizes the coordinates matrix by centering it using weighs (like charge).
@@ -44,7 +47,7 @@ def normalize_coordinates(coordinates, weights=None, scale=True, copy=False):
     if scale:
         std = np.sqrt(np.average(coordinates ** 2, axis=0, weights=None)) + 1e-20
         coordinates /= std
-    return coordinates, mean, std
+    return coordinates, mean.flatten(), std
 
 vertex_features = [
     'ChargeFirstPulse', 'ChargeLastPulse', 'ChargeMaxPulse', 'TimeFirstPulse', 'TimeLastPulse', 'TimeMaxPulse',
@@ -96,7 +99,7 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
     average_time = np.average(times, weights=charges)
 
     # For each event compute event features based on the pulses
-    doms, vertices, omkeys = [], [], []
+    omkeys = []
     for omkey, pulses in hits:
         dom_position = dom_positions[omkey]
         charges, times, times_shifted = [], [], []
@@ -157,9 +160,9 @@ def get_weight_by_flux(frame):
     else:
         nue_flux  = flux_service.getFlux(dataclasses.I3Particle.NuEBar , true_nu_energy, true_nu_coszen) * norm*0.5/0.3
         numu_flux = flux_service.getFlux(dataclasses.I3Particle.NuMuBar, true_nu_energy, true_nu_coszen) * norm*0.5/0.3
-    frame['NuMuFlux'] = dataclasses.I3VectorFloat(numu_flux)
-    frame['NueFlux'] = dataclasses.I3VectorFloat(nue_flux)
-    frame['NoFlux'] = dataclasses.I3VectorFloat(norm)
+    frame['NuMuFlux'] = dataclasses.I3Double(numu_flux)
+    frame['NueFlux'] = dataclasses.I3Double(nue_flux)
+    frame['NoFlux'] = dataclasses.I3Double(norm)
     return True
 
 
@@ -190,7 +193,7 @@ def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_t
     frame['PDGEncoding'] = dataclasses.I3Double(nu.pdg_encoding)
     frame['InteractionType'] = dataclasses.I3Double(frame['I3MCWeightDict']['InteractionType'])
     frame['NumberChannels'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['NchCleaned'])
-    frame['TotalCharge'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['DCFiducialPE'])
+    frame['DCFiducialPE'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['DCFiducialPE'])
     frame['NeutrinoEnergy'] = dataclasses.I3Double(frame['trueNeutrino'].energy)
     frame['CascadeEnergy'] = dataclasses.I3Double(frame['trueCascade'].energy)
     try:
@@ -204,16 +207,17 @@ def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_t
 
     ### Create features for each event 
     features, coordinates, _ = get_events_from_frame(frame, charge_scale=charge_scale, time_scale=time_scale)
-    for feature_name, values in vertex_features.items():
-        frame[feature_name] = dataclasses.I3VectorFloat(values)
+    for feature_name in vertex_features:
+        frame[feature_name] = dataclasses.I3VectorFloat(features[feature_name])
     
     ### Create offset lookups for the flattened feature arrays per event
-    frame['NumberVertices'] = icetray.I3Int(len(features[0]))
-    frame['Offset'] = icetray.I3Int(event_offset)
-    event_offset += len(features[0])
+    frame['NumberVertices'] = icetray.I3Int(len(features[features.keys()[0]]))
+    #frame['Offset'] = icetray.I3Int(event_offset)
+    event_offset += len(features[features.keys()[0]])
 
     ### Create coordinates for each vertex
-    coordinate_matrix = np.vstack(coordinates.values())
+    coordinate_matrix = np.vstack(coordinates.values()).T
+    #print(coordinate_matrix.shape, len(frame[feature_name]))
     C_mean_centered, C_mean, C_std = normalize_coordinates(coordinate_matrix, weights=None, copy=True)
     C_cog_centered, C_cog, C_cog_std = normalize_coordinates(coordinate_matrix, weights=features['TotalCharge'], copy=True)
     frame['VertexX'] = dataclasses.I3VectorFloat(C_mean_centered[:, 0])
@@ -228,10 +232,11 @@ def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_t
     distances_cog = pairwise_distances(C_cog_centered).reshape(-1)
     frame['Distances'] = dataclasses.I3VectorFloat(distances)
     frame['COGDistances'] = dataclasses.I3VectorFloat(distances_cog)
-    frame['DistancesOffset'] = icetray.I3Int(distances_offset)
+    #frame['DistancesOffset'] = icetray.I3Int(distances_offset)
     distances_offset += distances.shape[0] ** 2
 
     ### Compute targets for possible auxilliary tasks, i.e. position and direction of the interaction
+    #print((nu.pos.x - C_mean[0]) / C_std[0], C_mean[0], C_std[0])
     frame['PrimaryX'] = dataclasses.I3Double((nu.pos.x - C_mean[0]) / C_std[0])
     frame['PrimaryY'] = dataclasses.I3Double((nu.pos.y - C_mean[1]) / C_std[1])
     frame['PrimaryZ'] = dataclasses.I3Double((nu.pos.z - C_mean[2]) / C_std[2])
@@ -244,11 +249,11 @@ def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_t
     ### Compute possible reco inputs that apply to entire event sets
     track_reco = frame['IC86_Dunkman_L6_PegLeg_MultiNest8D_Track']
     frame['RecoX'] = dataclasses.I3Double((track_reco.pos.x - C_mean[0]) / C_std[0])
-    frame['RecoX'] = dataclasses.I3Double((track_reco.pos.y - C_mean[1]) / C_std[1])
-    frame['RecoX'] = dataclasses.I3Double((track_reco.pos.z - C_mean[2]) / C_std[2])
+    frame['RecoY'] = dataclasses.I3Double((track_reco.pos.y - C_mean[1]) / C_std[1])
+    frame['RecoZ'] = dataclasses.I3Double((track_reco.pos.z - C_mean[2]) / C_std[2])
     frame['COGRecoX'] = dataclasses.I3Double((track_reco.pos.x - C_cog[0]) / C_cog_std[0])
-    frame['COGRecoX'] = dataclasses.I3Double((track_reco.pos.x - C_cog[1]) / C_cog_std[1])
-    frame['COGRecoX'] = dataclasses.I3Double((track_reco.pos.x - C_cog[2]) / C_cog_std[2])
+    frame['COGRecoY'] = dataclasses.I3Double((track_reco.pos.x - C_cog[1]) / C_cog_std[1])
+    frame['COGRecoZ'] = dataclasses.I3Double((track_reco.pos.x - C_cog[2]) / C_cog_std[2])
     frame['RecoAzimuth'] = dataclasses.I3Double(track_reco.dir.azimuth)
     frame['RecoZenith'] = dataclasses.I3Double(track_reco.dir.zenith)
     return True
@@ -276,18 +281,18 @@ def create_dataset(outfile, infiles):
     tray.AddModule(I3TableWriter, 'I3TableWriter', keys = vertex_features + [
         # Meta data
         'PGDEncoding', 'Interaction', 'NumberChannels', 'NeutrinoEnergy', 
-        'CascadeEnergy', 'MuonEnergy', 'TrackLength', 'DeltaLLH',
+        'CascadeEnergy', 'MuonEnergy', 'TrackLength', 'DeltaLLH', 'DCFiducialPE',
         # Lookups
-        'NumberVertices', 'Offsets',
+        'NumberVertices',
         # Coordinates and pairwise distances
         'VertexX', 'VertexY', 'VertexZ', 'COGShiftedVertexX', 
         'COGShiftedVertexY', 'COGShiftedVertexZ', 'Distances',
-        'COGDistances', 'DistancesOffset',
+        'COGDistances',
         # Auxilliary targets
         'PrimaryX', 'PrimaryY', 'PrimaryZ', 'COGPrimaryX', 'COGPrimaryY', 
         'COGPrimaryZ', 'PrimaryAzimuth', 'PrimaryZenith',
         # Reconstruction
-        'RecoX', 'RecoY', 'RecoZ', 'COGRecoX', 'COGRecoY', 'COGRecoX',
+        'RecoX', 'RecoY', 'RecoZ', 'COGRecoX', 'COGRecoY', 'COGRecoZ',
         'RecoAzimuth', 'RecoZenith',
         # Flux weights
         'NuMuFlux', 'NueFlux', 'NoFlux',
@@ -305,5 +310,5 @@ if __name__ == '__main__':
     for interaction_type in ('nue', 'numu', 'nutau'):
         paths += glob('/project/6008051/hignight/dragon_3y/{0}/*'.format(interaction_type))
     assert(len(paths) == 1104)
-    outfile = '/project/6008051/fuchsgru/data/data_dragon3_parts/{0}.hd5'.format(file_idx)
+    outfile = '/project/6008051/fuchsgru/data/data_dragon6_parts/{0}.hd5'.format(file_idx)
     create_dataset(outfile, [paths[file_idx]])
