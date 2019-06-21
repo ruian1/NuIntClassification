@@ -280,7 +280,7 @@ def create_dataset(outfile, infiles):
     tray.AddModule(get_weight_by_flux, 'get_weight_by_flux')
     tray.AddModule(I3TableWriter, 'I3TableWriter', keys = vertex_features + [
         # Meta data
-        'PGDEncoding', 'Interaction', 'NumberChannels', 'NeutrinoEnergy', 
+        'PDGEncoding', 'InteractionType', 'NumberChannels', 'NeutrinoEnergy', 
         'CascadeEnergy', 'MuonEnergy', 'TrackLength', 'DeltaLLH', 'DCFiducialPE',
         # Lookups
         'NumberVertices',

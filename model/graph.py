@@ -85,27 +85,35 @@ class GraphConvolution(keras.layers.Layer):
         if self.dropout_rate:
             self.dropout = keras.layers.Dropout(rate=self.dropout_rate)
 
-    def call(self, inputs):
+    def call(self, inputs, training=None):
         x, A, masks = inputs
         hidden = self.dense(x)
         a = tf.matmul(A, hidden)
         #a = tf.concat([a, x], axis=-1)
         if self.use_batchnorm:
-            a = self.bn([a, masks])
+            a = self.bn([a, masks], training=training)
         if self.use_activation:
             a = self.activation(a)
             #x = tf.concat([x, activated], axis=-1)
         #a = tf.concat([a, x], axis=-1)
         if self.dropout_rate:
-            a = self.dropout(a)
+            a = self.dropout(a, training=training)
         return a
 
     
 class BatchNormalization(keras.layers.Layer):
     """ Layer that applies feature and batch normalization accounting for padded zeros. """
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, *args, momentum=0.99, **kwargs):
+        """ Batchnorm layer that accounts for padded vertices.
+        
+        Parameters:
+        -----------
+        momentum : float
+            The momentum for the moving mean and variance.
+        """
+        super().__init__(*args, **kwargs)
+        self.momentum = momentum
 
     def build(self, input_shape):
         shape_X, _ = input_shape
@@ -114,14 +122,26 @@ class BatchNormalization(keras.layers.Layer):
             weight_shape[idx] = 1
         self.beta = self.add_weight('beta', shape = weight_shape)
         self.gamma = self.add_weight('gamma', shape = weight_shape)
+        self.moving_mean = self.add_weight('moving_mean', shape=weight_shape, trainable=False)
+        self.moving_variance = self.add_weight('moving_variance', shape=weight_shape, trainable=False)
 
-    def call(self, inputs):
+    def call(self, inputs, training=None):
         X, masks = inputs # X is of shape [num_samples, num_vertices, num_features]
-        # Normalize over batch and vertices
-        vertex_mean = tf.expand_dims(padded_vertex_mean(X, masks), -2)
-        batch_mean = tf.reduce_mean(vertex_mean, axis=0, keepdims=True)
-        X_centered = X - batch_mean
-        X_var = tf.expand_dims(padded_vertex_mean(X_centered ** 2, masks), -2)
-        X_var = tf.reduce_mean(X_var, axis=0, keepdims=True)
-        X_normalized = X_centered / (tf.sqrt(X_var) + 1e-20)
+        #X = tf.Print(X, [X], 'X')
+        if training: # This is super weird, that during fit
+            # Normalize over batch and vertices
+            vertex_mean = tf.expand_dims(padded_vertex_mean(X, masks), -2)
+            batch_mean = tf.reduce_mean(vertex_mean, axis=0, keepdims=True)
+            X_centered = X - batch_mean
+            batch_variance = tf.expand_dims(padded_vertex_mean(X_centered ** 2, masks), -2)
+            batch_variance = tf.reduce_mean(batch_variance, axis=0, keepdims=True)
+            X_normalized = X_centered / (tf.sqrt(batch_variance) + 1e-20)
+            # Update the moving mean and variance
+            self.moving_mean = self.momentum * self.moving_mean + (1 - self.momentum) * batch_mean
+            self.moving_variance = self.momentum * self.moving_variance + (1 - self.momentum) * batch_variance
+        else:
+            # Use the moving mean and variance to scale the batch
+            #self.moving_mean = tf.Print(self.moving_mean, [self.moving_mean], 'mv')
+            X_normalized = X - self.moving_mean / (tf.sqrt(self.moving_variance) + 1e-20)
+
         return self.gamma * X_normalized + self.beta

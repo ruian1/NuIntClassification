@@ -5,12 +5,12 @@ from .graph import *
 from .util import *
 tf.enable_eager_execution()
 
-class GraphConvolutionalNetwork(keras.Model):
+class GraphConvolutionalNetwork(tf.keras.Model):
     """ Model for a Graph Convolutional Network with dense graph structure. The graph is obtained using
     a Gaussian kernel on the pairwise node distances. """
 
     def __init__(self, num_input_features, units_graph_convolutions = [64, 64], units_fully_connected = [32, 1], 
-        units_graph_features=None, dropout_rate=0.5, use_batchnorm=True, build_distances=False):
+        units_graph_features=None, dropout_rate=0.5, use_batchnorm=True, build_distances=False, **kwargs):
         """ Creates a GCNN model. 
 
         Parameters:
@@ -33,7 +33,7 @@ class GraphConvolutionalNetwork(keras.Model):
         build_distances : bool
             If the network is input with coordinates and has to build the pairwise distances itself.
         """
-        super().__init__()
+        super().__init__(**kwargs)
         self.is_binary_classifier = (units_graph_convolutions + units_fully_connected)[-1] == 1
         self.adjacency_layer = GaussianAdjacencyMatrix(build_distances=build_distances)
         self.graph_convolutions, self.fully_connecteds = [], []
@@ -47,7 +47,7 @@ class GraphConvolutionalNetwork(keras.Model):
                     hidden_dimension, 
                     dropout_rate = None if is_last_layer else dropout_rate,
                     use_activation = not is_last_layer,
-                    use_batchnorm = False #use_batchnorm and not is_last_layer,
+                    use_batchnorm = use_batchnorm and not is_last_layer,
                 )
             )
         
@@ -81,7 +81,8 @@ class GraphConvolutionalNetwork(keras.Model):
             self.graph_feature_layers = None
 
 
-    def call(self, inputs):
+    def call(self, inputs, training=True):
+        print(training)
         # Graph convolutions
         if self.graph_feature_layers is None:
             x, coordinates, masks = inputs
@@ -89,7 +90,7 @@ class GraphConvolutionalNetwork(keras.Model):
             x, graph_features, coordinates, masks = inputs
         A = self.adjacency_layer([coordinates, masks])
         for layer in self.graph_convolutions:
-            x = layer([x, A, masks])
+            x = layer([x, A, masks], training=training)
         # Average pooling of the node embeddings
         x = padded_vertex_mean(x, masks)
 
