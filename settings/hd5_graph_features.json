@@ -1,16 +1,19 @@
 {
     "dataset" : {
         "type" : "hd5",
-        "path" : "../data/data_dragon4.hd5",
+        "path" : "../data/data_dragon6.hd5",
         "validation_portion" : 0.1,
         "test_portion" : 0.1,
         "shuffle" : true,
         "features" : [
-            "ChargeFirstPulse", "TimeFirstPulse", "ChargeLastPulse", "TimeLastPulse", "TimeVariance", "IntegratedCharge",
-            "TimeMaxPulse", "ChargeMaxPulse",
-            "VertexX", "VertexY", "VertexZ"
+            "ChargeFirstPulse", "TimeFirstPulseShifted", "ChargeLastPulse", "TimeLastPulseShifted", "TimeStdShifted", 
+            "IntegratedCharge", "TimeMaxPulseShifted", "ChargeMaxPulse",
+            "COGShiftedVertexX", "COGShiftedVertexY", "COGShiftedVertexZ"
         ],
-        "distances" : "Distances",
+        "graph_features" : [
+            "COGRecoX", "COGRecoY", "COGRecoZ", "RecoAzimuth", "RecoZenith"
+        ],
+        "distances" : "COGDistances",
         "max_charge" : null,
         "balance_classes" : true,
         "min_track_length" : 70,
@@ -21,14 +24,14 @@
         "type" : "gcnn",
         "hidden_units_graph_convolutions" : [64, 64, 64, 64, 64],
         "hidden_units_fully_connected" : [1],
-        "use_batchnorm" : true,
+        "use_batchnorm" : false,
         "dropout_rate" : 0.5
     },
     "training" : {
         "metrics" : [
             "accuracy"
         ],
-        "learning_rate" : 1e-2,
+        "learning_rate" : 1e-3,
         "batch_size" : 64,
         "epochs" : 25,
         "directory" : "./training/hd5-{0}",

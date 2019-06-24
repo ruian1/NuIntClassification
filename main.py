@@ -57,30 +57,7 @@ class LossLoggingCalback(tf.keras.callbacks.Callback):
         self.model.save_weights(model_path)
         self.log(f'### Saved model weights to {model_path}')
 
-    def on_train_batch_end(self, batch, logs=None):
-        if logs is not None:
-            self.training_history.append([
-                logs[metric] for metric in logs
-            ])
-        if batch % 500 == 0:
-            print(logs)
-            """
-            if batch % 5 == 0:
-                metrics = self.model.evaluate_generator(
-                    self.data.get_batches(batch_size=self.batch_size, dataset='val'),
-                    steps=int(np.ceil(self.data.size(dataset='val') // self.batch_size))
-                )
-                print('Validation', metrics)
-            """
-        """
-        if batch % 25 == 0:
-            names = [weight.name for layer in self.model.layers for weight in layer.weights]
-            for name, weights in zip(names, self.model.get_weights()):
-                print(name, weights.mean(), weights.std())
-        """
-        #if batch > 10000:
-        #    exit(0)
-
+    
 
 if __name__ == '__main__':
 

@@ -74,7 +74,7 @@ class GraphConvolution(keras.layers.Layer):
         self.hidden_dim = hidden_dim
         self.dropout_rate = dropout_rate
         self.use_activation = use_activation
-        self.use_batchnorm = use_batchnorm
+        self.use_batchnorm = False #use_batchnorm
 
     def build(self, input_shape):
         self.dense = keras.layers.Dense(self.hidden_dim, input_shape=input_shape, use_bias=True)
@@ -97,7 +97,7 @@ class GraphConvolution(keras.layers.Layer):
             #x = tf.concat([x, activated], axis=-1)
         #a = tf.concat([a, x], axis=-1)
         if self.dropout_rate:
-            a = self.dropout(a, training=training)
+            a = self.dropout(a)
         return a
 
     
@@ -125,7 +125,7 @@ class BatchNormalization(keras.layers.Layer):
         self.moving_mean = self.add_weight('moving_mean', shape=weight_shape, trainable=False)
         self.moving_variance = self.add_weight('moving_variance', shape=weight_shape, trainable=False)
 
-    def call(self, inputs, training=None):
+    def call(self, inputs, training=None, epsilon=1e-10):
         X, masks = inputs # X is of shape [num_samples, num_vertices, num_features]
         #X = tf.Print(X, [X], 'X')
         if training: # This is super weird, that during fit
@@ -135,13 +135,13 @@ class BatchNormalization(keras.layers.Layer):
             X_centered = X - batch_mean
             batch_variance = tf.expand_dims(padded_vertex_mean(X_centered ** 2, masks), -2)
             batch_variance = tf.reduce_mean(batch_variance, axis=0, keepdims=True)
-            X_normalized = X_centered / (tf.sqrt(batch_variance) + 1e-20)
+            X_normalized = X_centered / (tf.sqrt(batch_variance) + epsilon)
             # Update the moving mean and variance
             self.moving_mean = self.momentum * self.moving_mean + (1 - self.momentum) * batch_mean
             self.moving_variance = self.momentum * self.moving_variance + (1 - self.momentum) * batch_variance
         else:
             # Use the moving mean and variance to scale the batch
             #self.moving_mean = tf.Print(self.moving_mean, [self.moving_mean], 'mv')
-            X_normalized = X - self.moving_mean / (tf.sqrt(self.moving_variance) + 1e-20)
+            X_normalized = (X - self.moving_mean) / (tf.sqrt(self.moving_variance) + epsilon)
 
         return self.gamma * X_normalized + self.beta

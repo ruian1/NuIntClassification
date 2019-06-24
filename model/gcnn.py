@@ -65,7 +65,7 @@ class GraphConvolutionalNetwork(tf.keras.Model):
                 self.fully_connecteds.append(keras.layers.Dropout(dropout_rate))
 
         # Add graph feature layers
-        if units_graph_features is not None:
+        if units_graph_features is not None and False:
             self.graph_feature_layers = []
             for layer_idx, hidden_dimension in enumerate(units_graph_features):
                 is_last_layer = layer_idx == len(units_graph_features) - 1
@@ -82,7 +82,6 @@ class GraphConvolutionalNetwork(tf.keras.Model):
 
 
     def call(self, inputs, training=True):
-        print(training)
         # Graph convolutions
         if self.graph_feature_layers is None:
             x, coordinates, masks = inputs
@@ -94,11 +93,13 @@ class GraphConvolutionalNetwork(tf.keras.Model):
         # Average pooling of the node embeddings
         x = padded_vertex_mean(x, masks)
 
+        """
         # Run the graph feature NN
         if self.graph_feature_layers is not None:
             for layer in self.graph_feature_layers:
                 graph_features = layer(graph_features)
             x = tf.concat([x, graph_features], -1)
+        """
 
         # Fully connected layers
         for layer in self.fully_connecteds:

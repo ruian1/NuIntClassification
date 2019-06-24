@@ -51,6 +51,8 @@ def dataset_from_config(config):
             test_portion = dataset_config['test_portion'],
             shuffle = dataset_config['shuffle'],
             features = dataset_config['features'],
+            graph_features = dataset_config['graph_features'],
+            distances = dataset_config['distances'],
             balance_dataset = dataset_config['balance_classes'],
             min_track_length= dataset_config['min_track_length'],
             max_cascade_energy= dataset_config['max_cascade_energy'],

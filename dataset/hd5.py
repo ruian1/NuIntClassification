@@ -42,7 +42,7 @@ class HD5Dataset(Dataset):
     """ Class to iterate over an HDF5 Dataset. """
 
     def __init__(self, filepath, validation_portion=0.1, test_portion=0.1, shuffle=True, 
-        features=['CumulativeCharge', 'Time', 'FirstCharge'], graph_features=None, 
+        features=['CumulativeCharge', 'Time', 'FirstCharge'], graph_features=None, distances='Distances', 
         seed = None, max_chunk_size=50000000, balance_dataset=False,
         min_track_length=None, max_cascade_energy=None, memmap_directory='./memmaps'):
         """ Initlaizes the dataset wrapper from multiple hdf5 files, each corresponding to exactly one class label.
@@ -61,6 +61,8 @@ class HD5Dataset(Dataset):
             A list of feature columns that must be present as children of the root of the hdf5 file.
         graph_features : list or None
             A list of feature columns for each graph (instead of vertex features) that must be present as children of the root of the hdf5 file.
+        distances : str
+            The name of the column that contains pairwise distances between vertices.
         seed : None or int  
             The seed of the numpy shuffling if given.
         max_cunk_size : int
@@ -114,14 +116,14 @@ class HD5Dataset(Dataset):
             print(f'Created feature memmap {feature_memmap}')
         distances_memmap = os.path.join(memmap_directory, f'hd5_distances_{memmap_hash}', )
         if os.path.exists(distances_memmap):
-            self.distances = np.memmap(distances_memmap, shape=self.file['Distances'].shape, dtype=np.float64)
+            self.distances = np.memmap(distances_memmap, shape=self.file[distances].shape, dtype=np.float64)
             print(f'Loaded distances memmap {distances_memmap}.')
         else:
-            self.distances = np.memmap(distances_memmap, shape=self.file['Distances'].shape, mode='w+', dtype=np.float64)
-            if self.file['Distances'].shape[0] <= max_chunk_size:
-                self.distances[:] = self.file['Distances']['item']
+            self.distances = np.memmap(distances_memmap, shape=self.file[distances].shape, mode='w+', dtype=np.float64)
+            if self.file[distances].shape[0] <= max_chunk_size:
+                self.distances[:] = self.file[distances]['item']
             else:
-                load_chunked(self.file, 'Distances', self.distances, max_chunk_size, column_idx=None)
+                load_chunked(self.file, distances, self.distances, max_chunk_size, column_idx=None)
             print(f'Created distances memmap {distances_memmap}.')
         if self.graph_feature_names is not None:
             graph_feature_memmap = os.path.join(memmap_directory, f'hd5_graph_features_{memmap_hash}')
