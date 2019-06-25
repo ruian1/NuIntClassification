@@ -84,6 +84,7 @@ def model_from_config(config):
             units_fully_connected = model_config['hidden_units_fully_connected'],
             use_batchnorm = model_config['use_batchnorm'],
             dropout_rate = model_config['dropout_rate'],
+            use_residual = model_config['use_residual'],
         )
         num_classes = (model_config['hidden_units_graph_convolutions'] + model_config['hidden_units_fully_connected'])[-1]
     else:
