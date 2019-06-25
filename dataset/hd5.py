@@ -7,7 +7,78 @@ import tempfile
 import os
 import hashlib
 
-__all__ = ['HD5Dataset', 'RecurrentHD5Dataset']
+import torch.utils.data
+
+__all__ = ['TorchHD5Dataset', 'HD5Dataset', 'RecurrentHD5Dataset']
+
+
+class TorchHD5Dataset(torch.utils.data.Dataset):
+    """ Class to wrap a dataset to be compatible with pytorches dataset loader. """
+
+    def __init__(self, dataset, type_):
+        """ Initializes the dataset wrapper. 
+        
+        Parameters:
+        -----------
+        dataset : Dataset
+            The data to be based on.
+        type_ : str
+            Either 'train', 'val' or 'test' depending on the type of the dataset.
+        """
+        self.dataset = dataset
+        self.type_ = type_
+
+    def __len__(self):
+        return self.dataset.size(self.type_)
+
+    def __getitem__(self, idx):
+        idx = self.dataset._get_idx(self.type_)[idx]
+        sample_offset = self.dataset.sample_offsets[idx]
+        distances_offset = self.dataset.distances_offsets[idx]
+        number_vertices = self.dataset.number_vertices[idx]
+        X = self.dataset.features[sample_offset : sample_offset + number_vertices]
+        D = self.dataset.distances[distances_offset : distances_offset + number_vertices ** 2].reshape((number_vertices, number_vertices))
+        y = self.dataset.targets[idx]
+        return X, D, y
+
+    def collate(self, samples):
+        """ Collator for the dataset wrapper.
+        
+        Parameters:
+        -----------
+        samples : list
+            A list of tuples representing the different inputs and targets.
+        
+        Returns:
+        --------
+        """
+        X = [sample[0] for sample in samples]
+        D = [sample[1] for sample in samples]
+        y = [sample[2] for sample in samples]
+
+        # Pad the batch
+        batch_size = len(X)
+        max_number_vertices = max(map(lambda features: features.shape[0], X))
+        num_features = X[0].shape[1]
+        features = np.zeros((batch_size, max_number_vertices, num_features))
+        distances = np.zeros((batch_size, max_number_vertices, max_number_vertices))
+        masks = np.zeros((batch_size, max_number_vertices, max_number_vertices))
+        for idx, (X_i, D_i) in enumerate(zip(X, D)):
+            features[idx, : X_i.shape[0]] = X_i
+            distances[idx, : D_i.shape[0], : D_i.shape[1]] = D_i
+            masks[idx, : X_i.shape[0], : X_i.shape[0]] = 1
+        
+        # Make torch tensors
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+        else:
+            device = torch.device('cpu')
+
+        features = torch.FloatTensor(features).to(device)
+        distances = torch.FloatTensor(distances).to(device)
+        masks = torch.FloatTensor(masks).to(device)
+        targets = torch.FloatTensor(y).to(device).unsqueeze(1)
+        return features, distances, masks, targets
 
 
 def load_chunked(hd5file, column, memmap, chunksize, column_idx=None):
@@ -150,6 +221,7 @@ class HD5Dataset(Dataset):
         has_track = np.logical_and(np.abs(pdg_encoding) == 14, interaction_type == 1)
         self.targets = has_track.astype(np.int)
 
+
     def get_number_features(self):
         """ Returns the number of features in the dataset. 
         
@@ -209,6 +281,8 @@ class HD5Dataset(Dataset):
             return features, self.graph_features[[batch_idxs], :], distances, masks
         else:
             return features, distances, masks
+
+    
 
 
 class RecurrentHD5Dataset(Dataset):

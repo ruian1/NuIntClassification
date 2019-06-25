@@ -195,7 +195,11 @@ def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_t
     frame['NumberChannels'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['NchCleaned'])
     frame['DCFiducialPE'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['DCFiducialPE'])
     frame['NeutrinoEnergy'] = dataclasses.I3Double(frame['trueNeutrino'].energy)
-    frame['CascadeEnergy'] = dataclasses.I3Double(frame['trueCascade'].energy)
+    # Some rare events do not produce a cascade
+    try:
+        frame['CascadeEnergy'] = dataclasses.I3Double(frame['trueCascade'].energy)
+    else:
+        frame['CascadeEnergy'] = dataclasses.I3Double(np.nan)
     try:
         # Appearently also frames with no primary muon contain this field, so to distinguish try to access it (which should throw an exception)
         frame['MuonEnergy'] = dataclasses.I3Double(frame['trueMuon'].energy)

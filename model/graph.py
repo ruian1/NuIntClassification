@@ -1,147 +1,263 @@
-import tensorflow as tf
-from tensorflow import keras
-import numpy as np
-from .util import *
-tf.enable_eager_execution()
 
-class GaussianAdjacencyMatrix(keras.layers.Layer):
-    """ Layer that creates the adjacency matrix based on a set of euclidean coordinates. """
+import torch
+import torch.nn as nn
 
-    def __init__(self, build_distances=True, **kwargs):
-        """ Creates a layer that builds a gaussian adjacency matrix with learnable sigma.
+__all__ = ['GraphConvolution', 'GraphConvolutionalNetwork']
+
+def padded_vertex_mean(X, masks, vertex_axis=-2, keepdim=True, epsilon=1e-8):
+    """ Calculates a mean along all vertices that were not padded.
+    
+    Paramters:
+    ----------
+    X : torch.FloatTensor, shape [batch_size, N, D]
+        The tensor to normalize.
+    masks : torch.FloatTensor, shape [batch_size, N, N]
+        The masks for the vertices.
+    vertex_axis : int
+        The axis of vertices that will be reduced.
+    keepdim : bool
+        If the rank of X should be kept.
+    epsilon : float
+        Epsilon to prevent zero divisions.
+    
+    Returns:
+    --------
+    X_mean : torch.FloatTensor, shape [batch_size, 1, D]
+        The vertex mean of X.
+    """
+    num_vertcies = torch.sum(torch.max(masks, -1)[0])
+    return torch.sum(X, vertex_axis, keepdim=keepdim) / (num_vertcies + epsilon)
+
+def padded_softmax(X, masks, axis=-1, keepdim=True, epsilon=1e-8):
+    """ Applies a softmax that considers padded vertices. 
+    
+    Paramters:
+    ----------
+    X : torch.FloatTensor, shape [batch_size, N, D]
+        The matrix to normalize.
+    masks : torch.FloatTensor, shape [batch_size, N, N]
+        The mask that considers padded vertices.
+    axis : int
+        The axis along which the softmax should be applied.
+    keepdim : bool
+        If the dimensions of X should be kept.
+    epsilon : float
+        Epsilon to prevent zero divisions.
+    
+    Returns:
+    --------
+    normalized : torch.FloatTonsor, shape [batch_size, ...]
+        The normalized data.
+    """
+    X = torch.exp(-X) * masks
+    normalization = torch.sum(X, axis, keepdim=True)
+    return X / (normalization + epsilon)
+
+
+class GraphConvolution(nn.Module):
+    """ Module that implements graph convolutions. """
+
+    def __init__(self, input_dim, output_dim, use_bias=True, activation=True, dropout_rate=None, use_batchnorm=False):
+        """ Initializes the graph convolution.
         
         Parameters:
         -----------
-        build_distances : bool
-            If true, the layer receives coordinates as inputs and builds pairwise distances.
-            If false, the layer receives precomputed pairwise distances.
+        input_dim : int
+            Number of input features.
+        output_dim : int
+            Number of output features.
+        use_bias : bool
+            If to use a bias for the linear transformation.
+        activation : bool
+            If an activation function should be applied to the embedding.
+        dropout_rate : float or None
+            If given, the dropout rate for this layer.
+        use_batchnorm : bool
+            If True, batchnorm that accounts for padded vertices will be applied.
         """
-        super().__init__(**kwargs)
-        self.build_distances = build_distances
+        super().__init__()
+        self.linear = nn.Linear(input_dim, output_dim, bias=use_bias)
+        if use_batchnorm:
+            self.batchnorm = PaddedBatchnorm(output_dim)
+        else:
+            self.batchnorm = None
+        if activation: 
+            self.activation = nn.ReLU()
+        else:
+            self.activation = None
+        if dropout_rate:
+            self.dropout = nn.modules.Dropout(dropout_rate)
+        else:
+            self.dropout = None
 
-    def build(self, input_shape):
-        shape_coordinates, _ = input_shape
-        self.permutation = [axis for axis in range(len(shape_coordinates.as_list()))]
-        self.permutation[-1], self.permutation[-2] = self.permutation[-2], self.permutation[-1]
-        self.sigma = self.add_weight('sigma', shape=[1]) #, constraint=keras.constraints.NonNeg()) #
-        
-    def call(self, inputs):
-        """ Creates a gaussian adjacency matrix. 
+    def forward(self, X, A, masks):
+        """ Forward pass.
         
         Parameters:
         -----------
-        inputs : tuple
-            If build_distances == True, then inputs consists of
-            - coordinates : tf.tensor, shape [..., N, 3]
-            - masks : tf.tensor, shape [..., N, N]
-            else it consists of:
-            - distances : tf.tensor, shape [..., N, N]
-            - masks : tf.tensor, shape [..., N, N]
-        
+        X : torch.FloatTensor, shape [batch_size, N, D]
+            The embedding matrices.
+        A : torch.FloatTensor, shape [batch_size, N, N]
+            Adjacency matrices for each event.
+        masks : torch.FloatTensor, shape [batch_size, N, N]
+            The masks for the adjacency matrix.
+
         Returns:
         --------
-        A : tf.tensor, shape [..., N, N]
-            The adjacency matrix of the graph.
+        X' : torch.floatTensor, shape [batch_size, N, D']
+            The embedding output of this layer.
         """
-        distances, masks = inputs
-        # Apply a gaussian kernel and normalize using a softmax
-        A = tf.exp(-distances / (self.sigma ** 2))
-        A = padded_softmax(A, masks)
-        #A = tf.Print(A, [A], 'Adjacency', summarize=100000000)
-        #A = tf.print()
-        #A = tf.Print(A, [A], 'Adjacency', summarize=100000000)
+        X = self.linear(X)
+        X = torch.bmm(A, X)
+        if self.batchnorm:
+            X = self.batchnorm(X, masks)
+        if self.activation:
+            X = self.activation(X)
+        if self.dropout:
+            X = self.dropout(X)
+        return X
+
+
+class PaddedBatchnorm(nn.Module):
+    """ Batchnorm that considers padded vertices. """
+
+    def __init__(self, number_features, momentum=.99, epsilon=1e-8):
+        """ Initializes the batchnorm layer that considers padded vertices.
+        
+        Parameters:
+        -----------
+        number_features : int
+            The number of features the embedding has.
+        momentum : float
+            Momentum for running mean and variance.
+        epsilon : float
+            Small value to improve numerical stabilities when performing divisons.
+        """
+        super().__init__()
+        self.register_buffer('running_mean', torch.zeros(number_features))
+        self.register_buffer('running_variance', torch.ones(number_features))
+        self.beta = nn.Parameter(torch.FloatTensor(number_features))
+        self.gamma = nn.Parameter(torch.FloatTensor(number_features))
+        nn.init.zeros_(self.beta)
+        nn.init.ones_(self.gamma)
+        self.epsilon = epsilon
+        self.momentum = momentum
+
+    def forward(self, X, masks):
+        """ """
+        if self.training:
+            # Calculate mean over vertices and batches, but consider padded vertices
+            batch_mean = torch.mean(padded_vertex_mean(X, masks, vertex_axis=-2, keepdim=True), 0, keepdim=True)
+            X_centered = X - batch_mean
+            batch_variance = torch.mean(padded_vertex_mean(X_centered ** 2, masks, vertex_axis=-2, keepdim=True), 0, keepdim=True)
+            X_scaled = X / (torch.sqrt(batch_variance) + self.epsilon)
+
+            # Update running mean and variance
+            self.running_mean = self.momentum * self.running_mean + (1 - self.momentum) * batch_mean
+            self.running_variance = self.momentum * self.running_variance + (1 - self.momentum) * batch_variance
+        else:
+            # Use estimates from running mean and running variance
+            X_scaled = (X - self.running_mean) / (torch.sqrt(self.running_variance) + self.epsilon)
+        return (X_scaled + self.beta) * self.gamma
+
+
+
+class GaussianKernel(nn.Module):
+    """ Applies a kernel to a distance matrix in order to build an adjacency matrix. """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.inverse_sigma = nn.Parameter(torch.rand(1) * 0.02 + 0.99)
+    
+    def forward(self, D, masks):
+        """ Forward pass through the kernel. 
+        
+        Parameters:
+        -----------
+        D : torch.FloatTensor, shape [batch_size, N, N]
+            Pairwise distances for each detector.
+        mask : torch.FloatTensor, shape [batch_size, N, N]
+            Padding mask for each adjacency matrix.
+
+        Returns:
+        --------
+        A : torch.FloatTensor, shape [batch_size, N, N]
+            Adjacency matrices for each event.
+        """
+        A = torch.exp(-self.inverse_sigma * D)
+        A = padded_softmax(A, -1)
         return A
 
 
+class GraphConvolutionalNetwork(nn.Module):
+    def __init__(self, num_input_features, units_graph_convolutions = [64, 64], units_fully_connected = [32, 1], 
+        units_graph_features=None, dropout_rate=0.5, use_batchnorm=True, **kwargs):
+        """ Creates a GCN model. 
 
-class GraphConvolution(keras.layers.Layer):
-    """ Block that implements a graph convolution. """
-
-    def __init__(self, hidden_dim, dropout_rate=None, use_activation=True, use_batchnorm=True, input_shape=None, **kwargs):
-        """ Initializes the GCNN Layer. 
         Parameters:
         -----------
-        hidden_dim : int or None
-            Kernel size, i.e. hidden dimensionality.
-        dropout_rate : None or float
-            The dropout rate after the activation is applied. If None, no dropout layer is added to the block.
-        use_activation : bool
-            If true, applies a ReLU activation after the linear operation.
+        num_input_features : int
+            Number of features for the input. 
+        units_graph_convolutions : list
+            The hidden units for each layer of graph convolution.
+        units_fully_connected : list
+            The hidden units for each fully connected layer.
+        units_graph_features : list or None
+            If a list, the network expects as an input X, F, coordinates / distances, masks, where F
+            represents a feature matrix that contains features for the entire graph. These features
+            are processed by a seperate feed forward layer structure and is aggregated with the
+            graph representation that is obtained by pooling the node embeddings after all GC layers.
+        dropout_rate : float
+            Dropout rate.
         use_batchnorm : bool
-            If true, applies batch normalization after the linear operation.
+            If batch normalization should be applied.
         """
         super().__init__(**kwargs)
-        self.hidden_dim = hidden_dim
-        self.dropout_rate = dropout_rate
-        self.use_activation = use_activation
-        self.use_batchnorm = False #use_batchnorm
+        self.kernel = GaussianKernel()
+        self.graph_convolutions = torch.nn.ModuleList()
+        self.layers_fully_connected = torch.nn.ModuleList()
+        for idx, (D, D_prime) in enumerate(zip([num_input_features] + units_graph_convolutions[:-1], units_graph_convolutions)):
+            is_last_layer = idx == len(units_graph_convolutions) - 1
+            self.graph_convolutions.append(
+                GraphConvolution(
+                    D, D_prime, use_bias=True, 
+                    activation=not is_last_layer, 
+                    dropout_rate=None if is_last_layer else dropout_rate,
+                    use_batchnorm=use_batchnorm and not is_last_layer
+                    ))
 
-    def build(self, input_shape):
-        self.dense = keras.layers.Dense(self.hidden_dim, input_shape=input_shape, use_bias=True)
-        if self.use_batchnorm:
-            self.bn = BatchNormalization()
-        if self.use_activation:
-            self.activation = keras.layers.ReLU()
-        if self.dropout_rate:
-            self.dropout = keras.layers.Dropout(rate=self.dropout_rate)
-
-    def call(self, inputs, training=None):
-        x, A, masks = inputs
-        hidden = self.dense(x)
-        a = tf.matmul(A, hidden)
-        #a = tf.concat([a, x], axis=-1)
-        if self.use_batchnorm:
-            a = self.bn([a, masks], training=training)
-        if self.use_activation:
-            a = self.activation(a)
-            #x = tf.concat([x, activated], axis=-1)
-        #a = tf.concat([a, x], axis=-1)
-        if self.dropout_rate:
-            a = self.dropout(a)
-        return a
-
-    
-class BatchNormalization(keras.layers.Layer):
-    """ Layer that applies feature and batch normalization accounting for padded zeros. """
-
-    def __init__(self, *args, momentum=0.99, **kwargs):
-        """ Batchnorm layer that accounts for padded vertices.
+        for idx, (D, D_prime) in enumerate(zip([units_graph_convolutions[-1]] + units_fully_connected[:-1], units_fully_connected)):
+            is_last_layer = idx == len(units_fully_connected) - 1
+            self.layers_fully_connected.append(nn.Linear(D, D_prime, bias=True))
+            if not is_last_layer:
+                self.layers_fully_connected.append(nn.ReLU())
+            else:
+                self.layers_fully_connected.append(nn.Sigmoid())
+        
+    def forward(self, X, D, masks):
+        """ Forward pass.
         
         Parameters:
         -----------
-        momentum : float
-            The momentum for the moving mean and variance.
+        X : torch.FloatTensor, shape [batch_size, N, D]
+            The node features.
+        D : torch.FloatTensor, shape [batch_size, N, N]
+            Pairwise distances for all nodes.
+        masks : torch.FloatTensor, shape [batch_size, N, N]
+            Masks for the adjacency / distance matrix.
         """
-        super().__init__(*args, **kwargs)
-        self.momentum = momentum
+        # Graph convolutions
+        A = self.kernel(D, masks)
+        for graph_convolution in self.graph_convolutions:
+            X = graph_convolution(X, A, masks)
 
-    def build(self, input_shape):
-        shape_X, _ = input_shape
-        weight_shape = shape_X.as_list()
-        for idx in range(len(weight_shape) - 1):
-            weight_shape[idx] = 1
-        self.beta = self.add_weight('beta', shape = weight_shape)
-        self.gamma = self.add_weight('gamma', shape = weight_shape)
-        self.moving_mean = self.add_weight('moving_mean', shape=weight_shape, trainable=False)
-        self.moving_variance = self.add_weight('moving_variance', shape=weight_shape, trainable=False)
+        # Average pooling
+        X = padded_vertex_mean(X, masks, vertex_axis=-2, keepdim=False)
 
-    def call(self, inputs, training=None, epsilon=1e-10):
-        X, masks = inputs # X is of shape [num_samples, num_vertices, num_features]
-        #X = tf.Print(X, [X], 'X')
-        if training: # This is super weird, that during fit
-            # Normalize over batch and vertices
-            vertex_mean = tf.expand_dims(padded_vertex_mean(X, masks), -2)
-            batch_mean = tf.reduce_mean(vertex_mean, axis=0, keepdims=True)
-            X_centered = X - batch_mean
-            batch_variance = tf.expand_dims(padded_vertex_mean(X_centered ** 2, masks), -2)
-            batch_variance = tf.reduce_mean(batch_variance, axis=0, keepdims=True)
-            X_normalized = X_centered / (tf.sqrt(batch_variance) + epsilon)
-            # Update the moving mean and variance
-            self.moving_mean = self.momentum * self.moving_mean + (1 - self.momentum) * batch_mean
-            self.moving_variance = self.momentum * self.moving_variance + (1 - self.momentum) * batch_variance
-        else:
-            # Use the moving mean and variance to scale the batch
-            #self.moving_mean = tf.Print(self.moving_mean, [self.moving_mean], 'mv')
-            X_normalized = (X - self.moving_mean) / (tf.sqrt(self.moving_variance) + epsilon)
-
-        return self.gamma * X_normalized + self.beta
+        # Fully connecteds
+        for layer in self.layers_fully_connected:
+            X = layer(X)
+        return X
+    
+            
+        

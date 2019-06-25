@@ -88,35 +88,6 @@ class Dataset(object):
         else:
             raise RuntimeError(f'Unkown dataset type {dataset}')
 
-    def get_batches(self, batch_size=32, dataset='train'):
-        """ Generator method for retrieving the data. 
-        Parameters:
-        -----------
-        batch_size : int
-            The batch size.
-        dataset : 'train' or 'val' or 'test'
-            The dataset to access.
-        
-        Yields:
-        -------
-        features_padded : ndarray, shape [batch_size, N_max, D]
-            Feature matrices for n graphs.
-        coordinates_padded : ndarray, shape [batch_size, N_max, 3]
-            Coordinate matrices for n graphs.
-        masks : ndarray, shape [batch_size, N_max, N_max]
-            Adjacency matrix mask for each of the graphs.
-        targets : ndarray, shape [batch_size]
-            Class labels.
-        """
-        idxs = self._get_idx(dataset)
-        # Loop over the dataset
-        while True:
-            for idx in range(0, idxs.shape[0], batch_size):
-                batch_idxs = idxs[idx : idx + batch_size]
-                features, coordinates, masks = self.get_padded_batch(batch_idxs)
-                targets = self.targets[batch_idxs]
-                yield [features, coordinates, masks], targets
-
     def _create_idx(self, validation_portion, test_portion, filters=None, shuffle=True, seed=None, balanced=True, min_track_length=None):
         """ Creates indices for training, validation and testing. 
         

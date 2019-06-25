@@ -57,17 +57,6 @@ def dataset_from_config(config):
             min_track_length= dataset_config['min_track_length'],
             max_cascade_energy= dataset_config['max_cascade_energy'],
         )
-    elif dataset_type in ('rhdf5', 'rhd5'):
-        data = RecurrentHD5Dataset(
-            dataset_config['path'],
-            validation_portion = dataset_config['validation_portion'], 
-            test_portion = dataset_config['test_portion'],
-            shuffle = dataset_config['shuffle'],
-            features = dataset_config['features'],
-            balance_dataset = dataset_config['balance_classes'],
-            min_track_length= dataset_config['min_track_length'],
-            max_cascade_energy= dataset_config['max_cascade_energy'],
-        )
     else:
         raise RuntimeError(f'Unknown dataset type {dataset_type}')
     return data
@@ -95,20 +84,8 @@ def model_from_config(config):
             units_fully_connected = model_config['hidden_units_fully_connected'],
             use_batchnorm = model_config['use_batchnorm'],
             dropout_rate = model_config['dropout_rate'],
-            build_distances = not config['dataset']['distances_precomputed'],
         )
         num_classes = (model_config['hidden_units_graph_convolutions'] + model_config['hidden_units_fully_connected'])[-1]
-    elif model_type == 'rgcnn':
-        model = RecurrentGraphConvolutionalNetwork(
-            number_input_features,
-            units_graph_convolutions = model_config['hidden_units_graph_convolutions'],
-            units_fully_connected = model_config['hidden_units_fully_connected'],
-            units_lstm = model_config['hidden_units_lstm'],
-            use_batchnorm = model_config['use_batchnorm'],
-            dropout_rate = model_config['dropout_rate'],
-            build_distances = not config['dataset']['distances_precomputed'],
-        )
-        num_classes = (model_config['hidden_units_graph_convolutions'] + model_config['hidden_units_fully_connected'] + model_config['hidden_units_lstm'])[-1]
     else:
         raise RuntimeError(f'Unkown model type {model_type}')
     return model

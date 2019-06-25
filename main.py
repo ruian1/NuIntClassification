@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-import tensorflow as tf
-import tensorflow.keras as keras
 import os.path
 from dataset import *
 import util
@@ -11,8 +9,14 @@ import os.path
 import json, pickle
 import argparse
 from glob import glob
-from collections import Mapping
-tf.enable_eager_execution()
+from collections import Mapping, defaultdict
+import time
+
+from sklearn.metrics import roc_auc_score, accuracy_score, f1_score, confusion_matrix
+
+import torch
+from torch.utils.data import Dataset, DataLoader
+from torch import nn
 
 def log(logfile, string):
     """ Prints a string and puts into the logfile if present. """
@@ -20,44 +24,43 @@ def log(logfile, string):
     if logfile is not None:
         logfile.write(str(string) + '\n')
 
-class LossLoggingCalback(tf.keras.callbacks.Callback):
-    """ Callback for logging the losses at the end of each epoch. """
 
-    def __init__(self, model, data, logfile, batch_size, training_dir, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.training_history = []
-        self.validation_history = []
-        self.model = model
-        self.data = data
-        self.logfile = logfile
-        self.batch_size = batch_size
-        self.training_dir = training_dir
-
-    def log(self, string):
-        log(self.logfile, string)
-
-    def on_epoch_end(self, epoch, logs=None):
-        metrics = self.model.evaluate_generator(
-            self.data.get_batches(batch_size=self.batch_size, dataset='val'),
-            steps=int(np.ceil(self.data.size(dataset='val') // self.batch_size))
-        )
-        self.validation_history.append(metrics)
-        self.log(f'\nMetrics: {metrics}')
-        predictions = self.model.predict_generator(
-            self.data.get_batches(batch_size=self.batch_size, dataset='val'),
-            steps=int(np.ceil(self.data.size(dataset='val') / self.batch_size))
-        )
-        unique_predictions = np.unique(predictions).shape[0] / predictions.shape[0]
-        self.log(f'Predictions: {predictions}, ({unique_predictions}% of {predictions.shape[0]} unique predictions)')
-        positives = (predictions > 0.5).sum() / predictions.shape[0]
-        self.log(f'Positive Rate: {positives}')
-        baseline_accuracy = self.data.get_baseline_accuracy(dataset='val')
-        self.log(f'Baseline accuracy {baseline_accuracy}')
-        model_path = os.path.join(self.training_dir, f'model_weights_{epoch}.h5')
-        self.model.save_weights(model_path)
-        self.log(f'### Saved model weights to {model_path}')
-
+def evaluate_model(model, data_loader, loss_function, logfile=None):
+    """ Evaluates the model performance on a dataset (validation or test).
     
+    Parameters:
+    -----------
+    model : torch.nn.Module
+        The classifier to evaluate.
+    data_loader : torch.utils.data.DataLoader
+        Loader for the dataset to evaluate on.
+    loss_function : torch.nn.Loss
+        The loss function that is optimized.
+    logfile : file-like or None
+        The file to put logs into.
+    """
+    model.eval()
+    metrics = defaultdict(float)
+    y_pred = np.zeros(len(data_loader.dataset))
+    y_true = np.zeros(len(data_loader.dataset))
+    for batch_idx, (X, D, masks, y_i) in enumerate(data_loader):
+        print(f'\rEvaluating {batch_idx + 1} / {len(data_loader)}', end='\r')
+        y_pred_i = model(X, D, masks)
+        loss = loss_function(y_pred_i, y_i)
+        y_pred[batch_idx * data_loader.batch_size : (batch_idx + 1) * data_loader.batch_size] = y_pred_i.data.cpu().numpy().squeeze()
+        y_true[batch_idx * data_loader.batch_size : (batch_idx + 1) * data_loader.batch_size] = y_i.data.cpu().numpy().squeeze()
+        metrics['loss'] += loss.item()
+
+    metrics['loss'] /= len(data_loader)
+    metrics['accuracy'] = accuracy_score(y_true, y_pred >= .5)
+    metrics['f1'] = f1_score(y_true, y_pred >= .5)
+    metrics['auc'] = roc_auc_score(y_true, y_pred)
+    metrics['ppr'] = (y_pred >= .5).sum() / y_pred.shape[0]
+    
+    values = ' -- '.join(map(lambda metric: f'{metric} : {(metrics[metric]):.4f}', metrics))
+    log(logfile, f'\nMetrics: {values}')
+    return metrics
+
 
 if __name__ == '__main__':
 
@@ -102,70 +105,68 @@ if __name__ == '__main__':
     with open(os.path.join(training_dir, 'config.json'), 'w+') as f:
         json.dump(settings, f)
     
-    checkpoint_path = os.path.join(training_dir, 'checkpoint', 'cp-{epoch:04d}.ckpt')
-    checkpoint_callback = keras.callbacks.ModelCheckpoint(
-            checkpoint_path, verbose=1, save_weights_only=True,
-            period = settings['training']['checkpoint_period']
-        )
-
-    data = util.dataset_from_config(settings)
-    model = util.model_from_config(settings)
-
-    logging_callback = LossLoggingCalback(model, data, logfile, settings['training']['batch_size'], training_dir)
-    lr_decay = settings['training']['learning_rate_decay']
-    if lr_decay is None:
-        lr_decay = settings['training']['learning_rate'] / settings['training']['epochs']
-        print(f'Using learning rate decay of {lr_decay}')
-    
-    optimizer = tf.keras.optimizers.Adam(lr=settings['training']['learning_rate'], decay=lr_decay)
-    loss = settings['training']['loss']
-    model.compile(optimizer=optimizer, 
-                loss=loss,
-                metrics=settings['training']['metrics'])
-    if settings['training']['use_class_weights']:
-        class_weights = data.get_class_weights()
-    else:
-        class_weights = None
-    print(f'Class weights {class_weights}')
+    # Load data
     batch_size = settings['training']['batch_size']
-    model.fit_generator(
-        data.get_batches(batch_size=batch_size, dataset='train'), 
-        steps_per_epoch = int(np.ceil(data.size(dataset='train') / batch_size)),
-        epochs = settings['training']['epochs'],
-        callbacks = [checkpoint_callback, logging_callback],
-        class_weight = class_weights,
-        #validation_data = data.get_batches(batch_size=batch_size, dataset='val'),
-        #validation_steps = int(np.ceil(data.size(dataset='val') / batch_size)),
-        )
-        
+    data = util.dataset_from_config(settings)
+    data_train = TorchHD5Dataset(data, 'train')
+    train_loader = DataLoader(data_train, batch_size=batch_size, shuffle=False, collate_fn=data_train.collate)
+    data_val = TorchHD5Dataset(data, 'val')
+    val_loader = DataLoader(data_val, batch_size=batch_size, shuffle=False, collate_fn=data_val.collate)
+    data_test = TorchHD5Dataset(data, 'test')
+    test_loader = DataLoader(data_test, batch_size=batch_size, shuffle=False, collate_fn=data_test.collate)
+
+    model = util.model_from_config(settings)
+    if torch.cuda.is_available():
+        model = model.cuda()
+        log(logfile, "Training on GPU")
+        log(logfile, "GPU type:\n{}".format(torch.cuda.get_device_name(0)))
+    loss_function = nn.functional.binary_cross_entropy
+
+    optimizer = torch.optim.Adamax(model.parameters(), lr=settings['training']['learning_rate'])
+    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max')
+    metrics = defaultdict(list)
+
+    epochs = settings['training']['epochs']
+    for epoch in range(epochs):
+        print(f'\nEpoch {epoch + 1} / {epochs}')
+        epoch_loss = 0
+        epoch_accuracy = 0
+        model.train()
+        t0 = time.time()
+        for batch_idx, (X, D, masks, y) in enumerate(train_loader):
+            optimizer.zero_grad()
+            y_pred = model(X, D, masks)
+            loss = loss_function(y_pred, y)
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+            y = y.data.cpu().numpy()
+            y_pred = y_pred.data.cpu().numpy()
+            y_pred = (y_pred >= .5).astype(np.int)
+            epoch_accuracy += (y == y_pred).sum() / y.shape[0]
+            dt = time.time() - t0
+            eta = dt * (len(train_loader) / (batch_idx + 1) - 1)
+
+            print(f'\r{batch_idx + 1} / {len(train_loader)}: batch_loss {loss.item():.4f} -- epoch_loss {epoch_loss / (batch_idx + 1):.4f} -- epoch acc {epoch_accuracy / (batch_idx + 1):.4f} -- mean of preds {y_pred.mean():.4f} # ETA: {int(eta):6}s      ', end='\r')
+            # Save model parameters
+            checkpoint_path = os.path.join(training_dir, f'model_{epoch + 1}')
+            torch.save(model.state_dict(), checkpoint_path)
+            log(logfile, f'Saved model to {checkpoint_path}')
+
+        log(logfile, '\n### Validation:')    
+        for metric, value in evaluate_model(model, val_loader, loss_function, logfile=logfile).items():
+            metrics[metric].append(value)
     
-    # Save the model
-    model_path = os.path.join(training_dir, 'model_weights.h5')
-    model.save_weights(model_path)
-    log(logfile, f'### Saved model weights to {model_path}')
+    log(logfile, '\n### Testing:')
+    metrics_testing = evaluate_model(model, test_loader, loss_function, logfile=logfile)
 
-    # Evaluate on test set
-    log(logfile, '### Test dataset results:')
-    test_metrics = model.evaluate_generator(
-            data.get_batches(batch_size=batch_size, dataset='test'),
-            steps=data.size(dataset='test') // batch_size)
-    log(logfile, test_metrics)
-    baseline_accuracy = data.get_baseline_accuracy(dataset='test')
-    log(logfile, f'Baseline accuracy {baseline_accuracy}')
-
-    # Save the history
-    history = {
-        'training' : logging_callback.training_history,
-        'validation' : logging_callback.validation_history,
-        'test' : test_metrics,
-    }
-    history_path = os.path.join(training_dir, 'history.pkl')
-    with open(history_path, 'wb') as f:
-        pickle.dump(history, f)
-    log(logfile, f'### Saved training history to {history_path}')
+    with open(os.path.join(training_dir, 'stats.pkl'), 'wb') as f:
+        pickle.dump({'val' : metrics, 'test' : metrics_testing}, f)
 
     if logfile is not None:
         logfile.close()
 
-    
+
+
+
 
