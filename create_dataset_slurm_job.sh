@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --time=1:00:00
-#SBATCH --output=log/create_dataset/data_dragon6.log  # %N for node name, %j for jobID
+#SBATCH --output=log/create_dataset/data_dragon6_part%a.log  # %N for node name, %j for jobID
 #SBATCH --account=rpp-kenclark
 #SBATCH --mem=8G
 

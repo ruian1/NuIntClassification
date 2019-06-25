@@ -198,7 +198,7 @@ def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_t
     # Some rare events do not produce a cascade
     try:
         frame['CascadeEnergy'] = dataclasses.I3Double(frame['trueCascade'].energy)
-    else:
+    except:
         frame['CascadeEnergy'] = dataclasses.I3Double(np.nan)
     try:
         # Appearently also frames with no primary muon contain this field, so to distinguish try to access it (which should throw an exception)
