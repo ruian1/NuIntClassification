@@ -25,8 +25,11 @@ def padded_vertex_mean(X, masks, vertex_axis=-2, keepdim=True, epsilon=1e-8):
     X_mean : torch.FloatTensor, shape [batch_size, 1, D]
         The vertex mean of X.
     """
-    num_vertcies = torch.sum(torch.max(masks, -1)[0])
-    return torch.sum(X, vertex_axis, keepdim=keepdim) / (num_vertcies + epsilon)
+    num_vertcies = torch.sum(torch.max(masks, -1, keepdim=True).values, vertex_axis, keepdim=True)
+    mean = torch.sum(X, vertex_axis, keepdim=True) / (num_vertcies + epsilon)
+    if not keepdim:
+        mean = torch.squeeze(mean, dim=vertex_axis)
+    return mean
 
 def padded_softmax(X, masks, axis=-1, keepdim=True, epsilon=1e-8):
     """ Applies a softmax that considers padded vertices. 
@@ -57,7 +60,8 @@ def padded_softmax(X, masks, axis=-1, keepdim=True, epsilon=1e-8):
 class GraphConvolution(nn.Module):
     """ Module that implements graph convolutions. """
 
-    def __init__(self, input_dim, output_dim, use_bias=True, activation=True, dropout_rate=None, use_batchnorm=False):
+    def __init__(self, input_dim, output_dim, use_bias=True, activation=True, dropout_rate=None, use_batchnorm=False,
+        use_residual=True):
         """ Initializes the graph convolution.
         
         Parameters:
@@ -74,6 +78,9 @@ class GraphConvolution(nn.Module):
             If given, the dropout rate for this layer.
         use_batchnorm : bool
             If True, batchnorm that accounts for padded vertices will be applied.
+        use_residual : bool
+            If the block should implement an additive skip connection. If True, this will only be implemented
+            if input_dim == output_dim.
         """
         super().__init__()
         self.linear = nn.Linear(input_dim, output_dim, bias=use_bias)
@@ -89,6 +96,7 @@ class GraphConvolution(nn.Module):
             self.dropout = nn.modules.Dropout(dropout_rate)
         else:
             self.dropout = None
+        self.use_residual = use_residual and input_dim == output_dim
 
     def forward(self, X, A, masks):
         """ Forward pass.
@@ -104,18 +112,20 @@ class GraphConvolution(nn.Module):
 
         Returns:
         --------
-        X' : torch.floatTensor, shape [batch_size, N, D']
+        E : torch.floatTensor, shape [batch_size, N, D']
             The embedding output of this layer.
         """
-        X = self.linear(X)
-        X = torch.bmm(A, X)
+        E = self.linear(X)
+        E = torch.bmm(A, E)
         if self.batchnorm:
-            X = self.batchnorm(X, masks)
+            E = self.batchnorm(E, masks)
         if self.activation:
-            X = self.activation(X)
+            E = self.activation(E)
+        if self.use_residual:
+            E = E + X
         if self.dropout:
-            X = self.dropout(X)
-        return X
+            E = self.dropout(E)
+        return E
 
 
 class PaddedBatchnorm(nn.Module):
@@ -191,7 +201,7 @@ class GaussianKernel(nn.Module):
 
 class GraphConvolutionalNetwork(nn.Module):
     def __init__(self, num_input_features, units_graph_convolutions = [64, 64], units_fully_connected = [32, 1], 
-        units_graph_features=None, dropout_rate=0.5, use_batchnorm=True, **kwargs):
+        units_graph_features=None, dropout_rate=0.5, use_batchnorm=True, use_residual=True, **kwargs):
         """ Creates a GCN model. 
 
         Parameters:
@@ -211,6 +221,9 @@ class GraphConvolutionalNetwork(nn.Module):
             Dropout rate.
         use_batchnorm : bool
             If batch normalization should be applied.
+        use_residual : bool
+            If the block should implement an additive skip connection. If True, this will only be implemented
+            if num_input_features == num_output_features for a graph convolution layer.
         """
         super().__init__(**kwargs)
         self.kernel = GaussianKernel()
@@ -246,6 +259,7 @@ class GraphConvolutionalNetwork(nn.Module):
         masks : torch.FloatTensor, shape [batch_size, N, N]
             Masks for the adjacency / distance matrix.
         """
+
         # Graph convolutions
         A = self.kernel(D, masks)
         for graph_convolution in self.graph_convolutions:

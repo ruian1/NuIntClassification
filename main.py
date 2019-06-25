@@ -38,6 +38,11 @@ def evaluate_model(model, data_loader, loss_function, logfile=None):
         The loss function that is optimized.
     logfile : file-like or None
         The file to put logs into.
+
+    Returns:
+    --------
+    metrics : defaultdict(float)
+        The statistics (metrics) for the model on the given dataset.
     """
     model.eval()
     metrics = defaultdict(float)
@@ -50,6 +55,8 @@ def evaluate_model(model, data_loader, loss_function, logfile=None):
         y_pred[batch_idx * data_loader.batch_size : (batch_idx + 1) * data_loader.batch_size] = y_pred_i.data.cpu().numpy().squeeze()
         y_true[batch_idx * data_loader.batch_size : (batch_idx + 1) * data_loader.batch_size] = y_i.data.cpu().numpy().squeeze()
         metrics['loss'] += loss.item()
+
+
 
     metrics['loss'] /= len(data_loader)
     metrics['accuracy'] = accuracy_score(y_true, y_pred >= .5)
@@ -99,7 +106,7 @@ if __name__ == '__main__':
     # Create a seed if non given
     if settings['dataset']['seed'] is None:
         settings['dataset']['seed'] = model_idx
-        print('Seeded with the model id ({model_idx}')
+        print(f'Seeded with the model id ({model_idx})')
 
     # Save a copy of the settings
     with open(os.path.join(training_dir, 'config.json'), 'w+') as f:
@@ -120,15 +127,25 @@ if __name__ == '__main__':
         model = model.cuda()
         log(logfile, "Training on GPU")
         log(logfile, "GPU type:\n{}".format(torch.cuda.get_device_name(0)))
-    loss_function = nn.functional.binary_cross_entropy
+    if settings['training']['loss'].lower() == 'binary_crossentropy':
+        loss_function = nn.functional.binary_cross_entropy
+    else:
+        raise RuntimeError(f'Unkown loss {settings["training"]["loss"]}')
 
     optimizer = torch.optim.Adamax(model.parameters(), lr=settings['training']['learning_rate'])
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max')
+    lr_scheduler_type = settings['training']['learning_rate_scheduler']
+    if lr_scheduler_type.lower() == 'reduce_on_plateau':
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=settings['training']['learning_rate_scheduler_patience'])
+    elif lr_scheduler_type.lower() == 'exponential_decay':
+        lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, settings['training']['learning_rate_decay'])
+    else:
+        raise RuntimeError(f'Unkown learning rate scheduler strategy {lr_scheduler_type}')
+
     metrics = defaultdict(list)
 
     epochs = settings['training']['epochs']
     for epoch in range(epochs):
-        print(f'\nEpoch {epoch + 1} / {epochs}')
+        print(f'\nEpoch {epoch + 1} / {epochs}, learning rate: {optimizer.param_groups[0]["lr"]}')
         epoch_loss = 0
         epoch_accuracy = 0
         model.train()
@@ -148,14 +165,18 @@ if __name__ == '__main__':
             eta = dt * (len(train_loader) / (batch_idx + 1) - 1)
 
             print(f'\r{batch_idx + 1} / {len(train_loader)}: batch_loss {loss.item():.4f} -- epoch_loss {epoch_loss / (batch_idx + 1):.4f} -- epoch acc {epoch_accuracy / (batch_idx + 1):.4f} -- mean of preds {y_pred.mean():.4f} # ETA: {int(eta):6}s      ', end='\r')
-            # Save model parameters
-            checkpoint_path = os.path.join(training_dir, f'model_{epoch + 1}')
-            torch.save(model.state_dict(), checkpoint_path)
-            log(logfile, f'Saved model to {checkpoint_path}')
 
+        # Validation
         log(logfile, '\n### Validation:')    
         for metric, value in evaluate_model(model, val_loader, loss_function, logfile=logfile).items():
             metrics[metric].append(value)
+        # Update learning rate, scheduler uses last accuracy as cirterion
+        lr_scheduler.step(metrics['accuracy'][-1])
+
+        # Save model parameters
+        checkpoint_path = os.path.join(training_dir, f'model_{epoch + 1}')
+        torch.save(model.state_dict(), checkpoint_path)
+        log(logfile, f'Saved model to {checkpoint_path}')
     
     log(logfile, '\n### Testing:')
     metrics_testing = evaluate_model(model, test_loader, loss_function, logfile=logfile)

@@ -26,20 +26,20 @@
         "hidden_units_lstm" : [32, 16],
         "hidden_units_fully_connected" : [32, 1],
         "hidden_units_graph_features" : null,
-        "use_batchnorm" : false,
-        "dropout_rate" : 0.2
+        "use_batchnorm" : true,
+        "dropout_rate" : 0.5,
+        "use_residual" : true
     },
     "training" : {
         "loss" : "binary_crossentropy",
-        "metrics" : [
-            "accuracy"
-        ],
-        "learning_rate" : 1e-4,
-        "learning_rate_decay" : null,
-        "batch_size" : 128,
+        "learning_rate" : 5e-4,
+        "learning_rate_scheduler" : "reduce_on_plateau",
+        "learning_rate_scheduler_patience" : 2,
+        "learning_rate_decay" : 1e-5,
+        "batch_size" : 64,
         "epochs" : 25,
         "directory" : "./hd5_{0}/",
-        "checkpoint_period" : 5,
+        "checkpoint_period" : 1,
         "use_class_weights" : true,
         "logfile" : null
     }

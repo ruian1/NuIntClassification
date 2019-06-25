@@ -22,12 +22,10 @@
         "hidden_units_graph_convolutions" : [64, 64, 64, 64, 64, 64],
         "hidden_units_fully_connected" : [1],
         "use_batchnorm" : true,
+        "use_residual" : true,
         "dropout_rate" : 0.5
     },
     "training" : {
-        "metrics" : [
-            "accuracy"
-        ],
         "learning_rate" : 5e-3,
         "batch_size" : 64,
         "epochs" : 25,
