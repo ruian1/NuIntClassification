@@ -1,10 +1,11 @@
 {
     "dataset" : {
-        "type" : "hdf5",
-        "path" : "../data/data_dragon.hd5",
-        "validation_portion" : 0.1,
-        "test_portion" : 0.1,
-        "shuffle" : true,
+        "type" : "hd5",
+        "paths" : {
+            "train" : "../data/data_dragon6_shuffled/train.hd5",
+            "validation" : "../data/data_dragon6_shuffled/val.hd5",
+            "test" : "../data/data_dragon6_shuffled/test.hd5"
+        },
         "features" : [
             "FirstCharge", "CumulativeCharge", "Time",
             "VertexX", "VertexY", "VertexZ",
@@ -12,13 +13,15 @@
             "RecoAzimuth", "RecoZenith"
         ],
         "graph_features" : null,
-        "distances" : "Distances",
+        "coordinates" : [
+            "VertexX", "VertexY", "VertexZ"
+        ],
+        "shuffle" : false,
         "max_charge" : null,
         "distances_precomputed" : false,
         "balance_classes" : false,
         "min_track_length" : null,
-        "max_cascade_energy" : null,
-        "seed" : null
+        "max_cascade_energy" : null
     },
     "model" : {
         "type" : "gcnn",
@@ -42,5 +45,6 @@
         "checkpoint_period" : 1,
         "use_class_weights" : true,
         "logfile" : null
-    }
+    },
+    "seed" : null
 }

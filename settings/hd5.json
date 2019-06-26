@@ -1,16 +1,21 @@
 {
     "dataset" : {
         "type" : "hd5",
-        "path" : "../data/data_dragon4.hd5",
-        "validation_portion" : 0.1,
-        "test_portion" : 0.1,
-        "shuffle" : true,
+        "paths" : {
+            "train" : "../data/data_dragon6_shuffled/train.hd5",
+            "validation" : "../data/data_dragon6_shuffled/val.hd5",
+            "test" : "../data/data_dragon6_shuffled/test.hd5"
+        },
         "features" : [
-            "ChargeFirstPulse", "TimeFirstPulse", "ChargeLastPulse", "TimeLastPulse", "TimeVariance", "IntegratedCharge",
-            "TimeMaxPulse", "ChargeMaxPulse",
+            "TimeFirstPulse", "TimeLastPulse", "TimeMaxPulse", "TimeStd",
+            "ChargeFirstPulse", "ChargeLastPulse", "ChargeMaxPulse",
             "VertexX", "VertexY", "VertexZ"
         ],
-        "distances" : "Distances",
+        "graph_features" : null,
+        "coordinates" : [
+            "VertexX", "VertexY", "VertexZ"
+        ],
+        "shuffle" : false,
         "max_charge" : null,
         "balance_classes" : true,
         "min_track_length" : 70,
@@ -26,11 +31,13 @@
         "dropout_rate" : 0.5
     },
     "training" : {
-        "learning_rate" : 5e-3,
+        "learning_rate" : 1e-2,
+        "learning_rate_scheduler_patience" : 3,
         "batch_size" : 64,
-        "epochs" : 25,
+        "epochs" : 100,
         "directory" : "./training/hd5-{0}",
-        "checkpoint_period" : 5,
+        "checkpoint_period" : 1,
         "use_class_weights" : true
-    }
+    },
+    "seed" : null
 }

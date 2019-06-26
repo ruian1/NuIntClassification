@@ -3,6 +3,8 @@ from dataset import *
 from model import *
 from collections import Mapping
 
+
+
 def dict_update(d, u):
     """ Recursively updates a dictionary with another. Used for parsing settings for training.
     
@@ -32,34 +34,44 @@ def dataset_from_config(config):
     
     Returns:
     --------
-    data : dataset.Dataset
-        The dataset to train / test on.
+    train : dataset.ShuffledTorchHD5Dataset
+        Training dataset.
+    val : dataset.ShuffledTorchHD5Dataset
+        Validation dataset.
+    test : dataset.ShuffledTorchHD5Dataset
+        Testing dataset.
+    
     """
     dataset_config = config['dataset']
     dataset_type = dataset_config['type'].lower()
-    if dataset_type == 'pickle':
-        data = PickleDataset(
-            path = dataset_config['path'],
-            validation_portion = dataset_config['validation_portion'], 
-            test_portion = dataset_config['test_portion'],
-            shuffle = dataset_config['shuffle']
-        )
-    elif dataset_type in ('hdf5', 'hd5'):
-        data = HD5Dataset(
-            dataset_config['path'],
-            validation_portion = dataset_config['validation_portion'], 
-            test_portion = dataset_config['test_portion'],
-            shuffle = dataset_config['shuffle'],
+    if dataset_type in ('hdf5', 'hd5'):
+        train = ShuffledTorchHD5Dataset(
+            dataset_config['paths']['train'],
             features = dataset_config['features'],
-            graph_features = dataset_config['graph_features'],
-            distances = dataset_config['distances'],
+            coordinates = dataset_config['coordinates'],
             balance_dataset = dataset_config['balance_classes'],
-            min_track_length= dataset_config['min_track_length'],
-            max_cascade_energy= dataset_config['max_cascade_energy'],
-        )
+            min_track_length = dataset_config['min_track_length'],
+            max_cascade_energy = dataset_config['max_cascade_energy'],
+            )
+        val = ShuffledTorchHD5Dataset(
+            dataset_config['paths']['validation'],
+            features = dataset_config['features'],
+            coordinates = dataset_config['coordinates'],
+            balance_dataset = False,
+            min_track_length = None,
+            max_cascade_energy = None,
+            )
+        test = ShuffledTorchHD5Dataset(
+            dataset_config['paths']['test'],
+            features = dataset_config['features'],
+            coordinates = dataset_config['coordinates'],
+            balance_dataset = False,
+            min_track_length = None,
+            max_cascade_energy = None,
+            )
+        return train, val, test
     else:
         raise RuntimeError(f'Unknown dataset type {dataset_type}')
-    return data
 
 def model_from_config(config):
     """ Creates a model from a configuration.
