@@ -7,7 +7,7 @@
             "test" : "../data/data_dragon6_shuffled/test.hd5"
         },
         "features" : [
-            "TimeFirstPulse", "TimeLastPulse", "TimeMaxPulse", "TimeStd",
+            "TimeFirstPulseShifted", "TimeLastPulseShifted", "TimeMaxPulseShifted", "TimeStdShifted",
             "ChargeFirstPulse", "ChargeLastPulse", "ChargeMaxPulse",
             "VertexX", "VertexY", "VertexZ"
         ],
@@ -24,15 +24,15 @@
     },
     "model" : {
         "type" : "gcnn",
-        "hidden_units_graph_convolutions" : [64, 64, 64, 64, 64, 64],
-        "hidden_units_fully_connected" : [1],
+        "hidden_units_graph_convolutions" : [64, 64, 64, 128, 128, 64, 64],
+        "hidden_units_fully_connected" : [32, 1],
         "use_batchnorm" : true,
         "use_residual" : true,
         "dropout_rate" : 0.5
     },
     "training" : {
-        "learning_rate" : 1e-2,
-        "learning_rate_scheduler_patience" : 3,
+        "learning_rate" : 1e-1,
+        "learning_rate_scheduler_patience" : 5,
         "batch_size" : 64,
         "epochs" : 100,
         "directory" : "./training/hd5-{0}",
