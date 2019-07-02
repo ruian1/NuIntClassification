@@ -75,9 +75,9 @@ def evaluate_model(model, data_loader, loss_function, logfile=None):
     y_pred = np.zeros(len(data_loader.dataset))
     y_true = np.zeros(len(data_loader.dataset))
     total_loss = 0
-    for batch_idx, (X, D, masks, y_i) in enumerate(data_loader):
+    for batch_idx, (inputs, y_i) in enumerate(data_loader):
         print(f'\rEvaluating {batch_idx + 1} / {len(data_loader)}', end='\r')
-        y_pred_i = model(X, D, masks)
+        y_pred_i = model(*inputs)
         loss = loss_function(y_pred_i, y_i)
         y_pred[batch_idx * data_loader.batch_size : (batch_idx + 1) * data_loader.batch_size] = y_pred_i.data.cpu().numpy().squeeze()
         y_true[batch_idx * data_loader.batch_size : (batch_idx + 1) * data_loader.batch_size] = y_i.data.cpu().numpy().squeeze()
@@ -140,9 +140,9 @@ if __name__ == '__main__':
     batch_size = settings['training']['batch_size']
 
     data_train, data_val, data_test = util.dataset_from_config(settings)
-    train_loader = DataLoader(data_train, batch_size=batch_size, shuffle=settings['dataset']['shuffle'], collate_fn=ShuffledTorchHD5Dataset.collate, drop_last=True)
-    val_loader = DataLoader(data_val, batch_size=batch_size, shuffle=settings['dataset']['shuffle'], collate_fn=ShuffledTorchHD5Dataset.collate, drop_last=True)
-    test_loader = DataLoader(data_test, batch_size=batch_size, shuffle=settings['dataset']['shuffle'], collate_fn=ShuffledTorchHD5Dataset.collate, drop_last=True)
+    train_loader = DataLoader(data_train, batch_size=batch_size, shuffle=settings['dataset']['shuffle'], collate_fn=data_train.collate, drop_last=False)
+    val_loader = DataLoader(data_val, batch_size=batch_size, shuffle=settings['dataset']['shuffle'], collate_fn=data_val.collate, drop_last=False)
+    test_loader = DataLoader(data_test, batch_size=batch_size, shuffle=settings['dataset']['shuffle'], collate_fn=data_test.collate, drop_last=False)
 
     model = util.model_from_config(settings)
     if torch.cuda.is_available():
@@ -157,7 +157,8 @@ if __name__ == '__main__':
     optimizer = torch.optim.Adamax(model.parameters(), lr=settings['training']['learning_rate'])
     lr_scheduler_type = settings['training']['learning_rate_scheduler']
     if lr_scheduler_type.lower() == 'reduce_on_plateau':
-        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=settings['training']['learning_rate_scheduler_patience'])
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', 
+        patience=settings['training']['learning_rate_scheduler_patience'], min_lr=settings['training']['min_learning_rate'])
     elif lr_scheduler_type.lower() == 'exponential_decay':
         lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, settings['training']['learning_rate_decay'])
     else:
@@ -173,9 +174,9 @@ if __name__ == '__main__':
         running_accuracy = 0
         model.train()
         t0 = time.time()
-        for batch_idx, (X, D, masks, y) in enumerate(train_loader):
+        for batch_idx, (inputs, y) in enumerate(train_loader):
             optimizer.zero_grad()
-            y_pred = model(X, D, masks)
+            y_pred = model(*inputs)
             loss = loss_function(y_pred, y)
             loss.backward()
             optimizer.step()

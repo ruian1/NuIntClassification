@@ -11,7 +11,6 @@
             "ChargeFirstPulse", "ChargeLastPulse", "ChargeMaxPulse",
             "VertexX", "VertexY", "VertexZ"
         ],
-        "graph_features" : null,
         "coordinates" : [
             "VertexX", "VertexY", "VertexZ"
         ],
@@ -19,19 +18,19 @@
         "max_charge" : null,
         "balance_classes" : true,
         "min_track_length" : 70,
-        "max_cascade_energy" : 10,
+        "max_cascade_energy" : null,
         "distances_precomputed" : true
     },
     "model" : {
-        "type" : "gcnn",
-        "hidden_units_graph_convolutions" : [64, 64, 64, 128, 128, 64, 64],
-        "hidden_units_fully_connected" : [32, 1],
+        "type" : "gcn",
+        "hidden_units_graph_convolutions" : [64, 64, 64, 64, 64],
+        "hidden_units_fully_connected" : [1],
         "use_batchnorm" : true,
         "use_residual" : true,
         "dropout_rate" : 0.5
     },
     "training" : {
-        "learning_rate" : 1e-1,
+        "learning_rate" : 1e-3,
         "learning_rate_scheduler_patience" : 5,
         "batch_size" : 64,
         "epochs" : 100,

@@ -9,7 +9,6 @@ from sklearn.metrics import pairwise_distances
 
 import torch.utils.data
 
-
 class ShuffledTorchHD5Dataset(torch.utils.data.Dataset):
     """ Class to represent a pre-shuffled PyTorch dataset originating from an HD5File. """
 
@@ -60,23 +59,22 @@ class ShuffledTorchHD5Dataset(torch.utils.data.Dataset):
                 class_idx = np.where(np.logical_and((targets == class_), filter))[0]
                 np.random.shuffle(class_idx)
                 filter[class_idx[min_class_size : ]] = False
-            idxs = np.where(filter)[0]
+            self._idxs = np.where(filter)[0]
             # Assert that the class counts are the same now
-            _, class_counts = np.unique(targets[idxs], return_counts=True)
+            _, class_counts = np.unique(targets[self._idxs], return_counts=True)
             assert np.allclose(class_counts, min_class_size)
-            #print(class_counts, idxs.shape)
-            print(f'Reduced dataset to {min_class_size} samples per class ({idxs.shape[0]} / {targets.shape[0]})')
+            print(f'Reduced dataset to {min_class_size} samples per class ({self._idxs.shape[0]} / {targets.shape[0]})')
         else:
-            idxs = np.arange(targets.shape[0])
-        self.number_vertices = number_vertices[idxs]
+            self._idxs = np.arange(targets.shape[0])
+        self.number_vertices = number_vertices[self._idxs]
         self.event_offsets = self.number_vertices.cumsum() - self.number_vertices
-        self.targets = targets[idxs]
+        self.targets = targets[self._idxs]
 
         # Create memmaps for features and coordinates for faster access during training
         os.makedirs(os.path.dirname(memmap_directory), exist_ok=True)
 
         # Load precomputed memmaps based on the hash of the columns, filename and index set
-        idxs_hash = hashlib.sha1(idxs.data).hexdigest()
+        self._idxs_hash = hashlib.sha1(self._idxs.data).hexdigest()
         features_hash = hashlib.sha1(str([
             [os.path.relpath(filepath)] + features
         ]).encode()).hexdigest()
@@ -84,19 +82,19 @@ class ShuffledTorchHD5Dataset(torch.utils.data.Dataset):
             [os.path.relpath(filepath)] + coordinates
         ]).encode()).hexdigest()
 
-        feature_memmap_path = os.path.join(memmap_directory, f'hd5_features_{features_hash}_{idxs_hash}')
-        coordinate_memmap_path = os.path.join(memmap_directory, f'hd5_coordinates_{coordinates_hash}_{idxs_hash}')
+        feature_memmap_path = os.path.join(memmap_directory, f'hd5_features_{features_hash}_{self._idxs_hash}')
+        coordinate_memmap_path = os.path.join(memmap_directory, f'hd5_coordinates_{coordinates_hash}_{self._idxs_hash}')
 
         if not os.path.exists(feature_memmap_path) or not os.path.exists(coordinate_memmap_path):
             # Create an index set that operates on vertex features, which is used to build memmaps efficiently
-            vertex_idxs = np.concatenate([np.arange(start, end) for start, end in zip(self.event_offsets, self.event_offsets + self.number_vertices)]).tolist()
+            _vertex_idxs = np.concatenate([np.arange(start, end) for start, end in zip(self.event_offsets, self.event_offsets + self.number_vertices)]).tolist()
         
         if not os.path.exists(feature_memmap_path):
             # Create a new memmap for all features
             self.features = np.memmap(feature_memmap_path, shape=(self.number_vertices.sum(), len(self.feature_names)), dtype=np.float64, mode='w+')
             for feature_idx, feature in enumerate(self.feature_names):
                 print(f'\rCreating column for feature {feature}', end='\r')
-                self.features[:, feature_idx] = np.array(self.file.get(feature))[vertex_idxs]
+                self.features[:, feature_idx] = np.array(self.file.get(feature))[_vertex_idxs]
             print(f'\nCreated feature memmap {feature_memmap_path}')
         else:
             self.features = np.memmap(feature_memmap_path, shape=(self.number_vertices.sum(), len(self.feature_names)), dtype=np.float64)
@@ -106,7 +104,7 @@ class ShuffledTorchHD5Dataset(torch.utils.data.Dataset):
             self.coordinates = np.memmap(coordinate_memmap_path, shape=(self.number_vertices.sum(), len(self.coordinate_names)), dtype=np.float64, mode='w+')
             for coordinate_idx, coordinate in enumerate(self.coordinate_names):
                 print(f'\rCreating column for coordinate {coordinate}', end='\r')
-                self.coordinates[:, coordinate_idx] = np.array(self.file.get(coordinate))[vertex_idxs]
+                self.coordinates[:, coordinate_idx] = np.array(self.file.get(coordinate))[_vertex_idxs]
             print(f'\nCreated coordinate memmap {coordinate_memmap_path}')
         else:
             self.coordinates = np.memmap(coordinate_memmap_path, shape=(self.number_vertices.sum(), len(self.coordinate_names)), dtype=np.float64)
@@ -136,18 +134,17 @@ class ShuffledTorchHD5Dataset(torch.utils.data.Dataset):
         
         Returns:
         --------
-        X : torch.FloatTensor, shape [batch_size, N, D]
-            The vertex features.
-        C : torch.FloatTensor, shape [batch_size, N, num_coordinates]
-            Pariwise distances.
-        masks : torch.FloatTensor, shape [batch_size, N, N]
-            Adjacency matrix masks.
+        inputs : tuple
+            - X : torch.FloatTensor, shape [batch_size, N, D]
+                The vertex features.
+            - C : torch.FloatTensor, shape [batch_size, N, num_coordinates]
+                Pariwise distances.
+            - masks : torch.FloatTensor, shape [batch_size, N, N]
+                Adjacency matrix masks.
         targets : torch.FloatTensor, shape [batch_size, N, 1]
             Class labels.
         """
-        X = [sample[0] for sample in samples]
-        C = [sample[1] for sample in samples]
-        y = [sample[2] for sample in samples]
+        X, C, y = zip(*samples)
 
         # Pad the batch
         batch_size = len(X)
@@ -170,7 +167,219 @@ class ShuffledTorchHD5Dataset(torch.utils.data.Dataset):
         coordinates = torch.FloatTensor(coordinates).to(device)
         masks = torch.FloatTensor(masks).to(device)
         targets = torch.FloatTensor(y).to(device).unsqueeze(1)
-        return features, coordinates, masks, targets
+        return (features, coordinates, masks), targets
+
+class ShuffledTorchHD5DatasetWithGraphFeatures(ShuffledTorchHD5Dataset):
+    """ Pre-shuffled PyTorch dataset that also outputs graph features. """
+    def __init__(self, filepath, features=['CumulativeCharge', 'Time', 'FirstCharge'], coordinates=['VertexX', 'VertexY', 'VertexZ'],
+        graph_features = ['RecoX', 'RecoY', 'RecoZ', 'RecoAzimuth', 'RecoZenith'], 
+        balance_dataset=False, min_track_length=None, max_cascade_energy=None, memmap_directory='./memmaps'):
+        """ Initializes the Dataset. 
+        
+        Parameters:
+        -----------
+        filepath : str
+            A path to the hd5 file.
+        features : list
+            A list of dataset columns in the HD5 File that represent the vertex features.
+        coordinates : list
+            A list of coordinate columns in the HD5 File that represent the coordinates of each vertex.
+        graph_features : list
+            A list of graph feature columns in the HD5 File that represent event features.
+        balance_dataset : bool
+            If the dataset should be balanced such that each class contains the same number of samples.
+        min_track_length : float or None
+            Minimal track length all track-events must have.
+        max_cascade_energy : float or None
+            The maximal cascade energy all track events are allowed to have.
+        memmap_directory : str
+            Directory for memmaps.
+        """
+        super().__init__(filepath, features=features, coordinates=coordinates, balance_dataset=balance_dataset, 
+            min_track_length=min_track_length, max_cascade_energy=max_cascade_energy, memmap_directory=memmap_directory)
+        self.graph_feature_names = graph_features
+
+        graph_features_hash = hashlib.sha1(str([
+            [os.path.relpath(filepath)] + graph_features
+        ]).encode()).hexdigest()
+
+        graph_features_memmap_path = os.path.join(memmap_directory, f'hd5_graph_features_{graph_features_hash}_{self._idxs_hash}')
+
+        if not os.path.exists(graph_features_memmap_path):
+            # Create a new memmap for all graph features
+            self.graph_features = np.memmap(graph_features_memmap_path, shape=(self._idxs.shape[0], len(self.graph_feature_names)), dtype=np.float64, mode='w+')
+            for feature_idx, graph_feature in enumerate(self.graph_feature_names):
+                print(f'\rCreating column for graph_feature {graph_feature}', end='\r')
+                self.graph_features[:, feature_idx] = np.array(self.file.get(graph_feature))[self._idxs]
+            print(f'\nCreated feature memmap {graph_features_memmap_path}')
+        else:
+            self.graph_features = np.memmap(graph_features_memmap_path, shape=(self._idxs.shape[0], len(self.graph_feature_names)), dtype=np.float64)
+
+    def __getitem__(self, idx):
+        X, C, y = super().__getitem__(idx)
+        return X, C, self.graph_features[idx], y
+
+    @staticmethod
+    def collate(samples):
+        """ Collator for the dataset wrapper.
+        
+        Parameters:
+        -----------
+        samples : list
+            A list of tuples representing the different inputs and targets.
+        
+        Returns:
+        --------
+        inputs : tuple
+            - X : torch.FloatTensor, shape [batch_size, N, D]
+                The vertex features.
+            - C : torch.FloatTensor, shape [batch_size, N, num_coordinates]
+                Pariwise distances.
+            - masks : torch.FloatTensor, shape [batch_size, N, N]
+                Adjacency matrix masks.
+            - F : torch.FloatTensor, shape [batch_size, N]
+                Graph features.
+        targets : torch.FloatTensor, shape [batch_size, N, 1]
+            Class labels.
+        """
+        X, C, F, y = zip(*samples)
+
+        # Pad the batch
+        batch_size = len(X)
+        max_number_vertices = max(map(lambda features: features.shape[0], X))
+        features = np.zeros((batch_size, max_number_vertices, X[0].shape[1]))
+        coordinates = np.zeros((batch_size, max_number_vertices, C[0].shape[1]))
+        masks = np.zeros((batch_size, max_number_vertices, max_number_vertices))
+        graph_features = np.array(F)
+        for idx, (X_i, C_i) in enumerate(zip(X, C)):
+            features[idx, : X_i.shape[0]] = X_i
+            coordinates[idx, : C_i.shape[0], : C_i.shape[1]] = C_i
+            masks[idx, : X_i.shape[0], : X_i.shape[0]] = 1
+        
+        # Make torch tensors
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+        else:
+            device = torch.device('cpu')
+
+        features = torch.FloatTensor(features).to(device)
+        coordinates = torch.FloatTensor(coordinates).to(device)
+        masks = torch.FloatTensor(masks).to(device)
+        targets = torch.FloatTensor(y).to(device).unsqueeze(1)
+        graph_features = torch.FloatTensor(graph_features).to(device)
+        return (features, coordinates, masks, graph_features), targets
+
+class ShuffledTorchHD5DatasetWithGraphFeaturesAndAuxiliaryTargets(ShuffledTorchHD5DatasetWithGraphFeatures):
+    """ Pre-shuffled PyTorch dataset that will yield graph features as well as regression targets for an auxilliary task. """
+    def __init__(self, filepath, features=['CumulativeCharge', 'Time', 'FirstCharge'], coordinates=['VertexX', 'VertexY', 'VertexZ'],
+        graph_features = ['RecoX', 'RecoY', 'RecoZ', 'RecoAzimuth', 'RecoZenith'], auxiliary_targets=[],
+        balance_dataset=False, min_track_length=None, max_cascade_energy=None, memmap_directory='./memmaps'):
+        """ Initializes the Dataset. 
+        
+        Parameters:
+        -----------
+        filepath : str
+            A path to the hd5 file.
+        features : list
+            A list of dataset columns in the HD5 File that represent the vertex features.
+        coordinates : list
+            A list of coordinate columns in the HD5 File that represent the coordinates of each vertex.
+        graph_features : list
+            A list of graph feature columns in the HD5 File that represent event features.
+        auxiliary_targets : list
+            A list of graph feature columns that are used as targets for the auxiliary regression task.
+        balance_dataset : bool
+            If the dataset should be balanced such that each class contains the same number of samples.
+        min_track_length : float or None
+            Minimal track length all track-events must have.
+        max_cascade_energy : float or None
+            The maximal cascade energy all track events are allowed to have.
+        memmap_directory : str
+            Directory for memmaps.
+        """
+        super().__init__(filepath, features=features, coordinates=coordinates, balance_dataset=balance_dataset, 
+            min_track_length=min_track_length, max_cascade_energy=max_cascade_energy, memmap_directory=memmap_directory, 
+            graph_features=graph_features)
+
+        self.auxiliary_target_names = auxiliary_targets
+
+        auxiliary_targets_hash = hashlib.sha1(str([
+            [os.path.relpath(filepath)] + auxiliary_targets
+        ]).encode()).hexdigest()
+
+        auxiliary_targets_memmap_path = os.path.join(memmap_directory, f'hd5_auxiliary_targets_{auxiliary_targets_hash}_{self._idxs_hash}')
+
+        if not os.path.exists(auxiliary_targets_memmap_path):
+            # Create a new memmap for all graph features
+            self.auxiliary_targets = np.memmap(auxiliary_targets_memmap_path, shape=(self._idxs.shape[0], len(self.auxiliary_target_names)), dtype=np.float64, mode='w+')
+            for target_idx, auxilary_target in enumerate(self.auxiliary_target_names):
+                print(f'\rCreating column for auxiliary target {auxiliary_target}', end='\r')
+                self.auxiliary_targets[:, target_idx] = np.array(self.file.get(auxilary_target))[self._idxs]
+            print(f'\nCreated auxiliary target memmap {auxiliary_targets_memmap_path}')
+        else:
+            self.auxiliary_targets = np.memmap(auxiliary_targets_memmap_path, shape=(self._idxs.shape[0], len(self.auxiliary_target_names)), dtype=np.float64)
+
+
+    def __getitem__(self, idx):
+        X, C, F, y = super().__getitem__(idx)
+        return X, C, F, y, self.auxiliary_targets[idx]
+
+    
+    @staticmethod
+    def collate(samples):
+        """ Collator for the dataset wrapper.
+        
+        Parameters:
+        -----------
+        samples : list
+            A list of tuples representing the different inputs and targets.
+        
+        Returns:
+        --------
+        inputs : tuple
+            - X : torch.FloatTensor, shape [batch_size, N, D]
+                The vertex features.
+            - C : torch.FloatTensor, shape [batch_size, N, num_coordinates]
+                Pariwise distances.
+            - masks : torch.FloatTensor, shape [batch_size, N, N]
+                Adjacency matrix masks.
+            - F : torch.FloatTensor, shape [batch_size, N]
+                Graph features.
+        targets : tuple
+            - y : torch.FloatTensor, shape [batch_size, 1]
+                Class labels.
+            - r : torch.FloatTensor, shape [batch_size, K]
+                Regression targets.
+        """
+        X, C, F, y, r  = zip(*samples)
+
+        # Pad the batch
+        batch_size = len(X)
+        max_number_vertices = max(map(lambda features: features.shape[0], X))
+        features = np.zeros((batch_size, max_number_vertices, X[0].shape[1]))
+        coordinates = np.zeros((batch_size, max_number_vertices, C[0].shape[1]))
+        masks = np.zeros((batch_size, max_number_vertices, max_number_vertices))
+        graph_features = np.array(F)
+        for idx, (X_i, C_i) in enumerate(zip(X, C)):
+            features[idx, : X_i.shape[0]] = X_i
+            coordinates[idx, : C_i.shape[0], : C_i.shape[1]] = C_i
+            masks[idx, : X_i.shape[0], : X_i.shape[0]] = 1
+        
+        # Make torch tensors
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+        else:
+            device = torch.device('cpu')
+
+        features = torch.FloatTensor(features).to(device)
+        coordinates = torch.FloatTensor(coordinates).to(device)
+        masks = torch.FloatTensor(masks).to(device)
+        targets = torch.FloatTensor(y).to(device).unsqueeze(1)
+        regression_targets = torch.FloatTensor(r).to(device)
+        graph_features = torch.FloatTensor(graph_features).to(device)
+        return (features, coordinates, masks, graph_features), (targets, regression_targets)
+
+
 
 def event_filter(file, min_track_length=None, max_cascade_energy=None):
     """ Filters events by certain requiremenents.
