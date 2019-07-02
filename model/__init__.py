@@ -7,5 +7,6 @@ __all__ = [
     'GraphConvolutionalNetwork',
     'GraphConvolution',
     'GraphConvolutionalNetworkWithGraphFeatures',
+    'AuxiliaryGraphConvolutionalNetworkWithGraphFeatures',
 ]
 

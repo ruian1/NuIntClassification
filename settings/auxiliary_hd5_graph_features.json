@@ -1,6 +1,6 @@
 {
     "dataset" : {
-        "type" : "hd5",
+        "type" : "hd5_graph_features_regression",
         "paths" : {
             "train" : "../data/data_dragon6_shuffled/train.hd5",
             "validation" : "../data/data_dragon6_shuffled/val.hd5",
@@ -23,23 +23,23 @@
         "max_charge" : null,
         "balance_classes" : true,
         "min_track_length" : 70,
-        "max_cascade_energy" : 10,
-        "distances_precomputed" : true
+        "max_cascade_energy" : 10
     },
     "model" : {
-        "type" : "gcn",
-        "hidden_units_graph_convolutions" : [128, 128, 128, 128, 64, 64, 64],
-        "hidden_units_fully_connected" : [1],
+        "type" : "gcn_graph_features_regression",
+        "hidden_units_graph_convolutions" : [64, 64, 64, 64, 64, 64, 64],
+        "hidden_units_fully_connected" : [64, 64, 64, 64, 1],
+        "hidden_units_graph_mlp" : [64, 64, 64],
+        "hidden_units_regression" : [64, 64, 64, 5],
         "use_batchnorm" : true,
         "use_residual" : true,
         "dropout_rate" : 0.5
     },
     "training" : {
         "learning_rate" : 1e-2,
-        "min_learning_rate" : 1e-6,
-        "learning_rate_scheduler_patience" : 5,
+        "learning_rate_scheduler_patience" : 3,
         "batch_size" : 64,
-        "epochs" : 100,
+        "epochs" : 25,
         "directory" : "./training/hd5-{0}",
         "checkpoint_period" : 1,
         "use_class_weights" : true

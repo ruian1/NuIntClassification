@@ -208,6 +208,8 @@ def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_t
         frame['MuonEnergy'] = dataclasses.I3Double(np.nan)
         frame['TrackLength'] = dataclasses.I3Double(np.nan)
     frame['DeltaLLH'] = dataclasses.I3Double(frame['IC86_Dunkman_L6']['delta_LLH']) # Used for a baseline classifcation
+    frame['RunID'] = icetray.I3Int(frame['I3EventHeader'].run_id)
+    frame['EventID'] = icetray.I3Int(frame['I3EventHeader'].event_id)
 
     ### Create features for each event 
     features, coordinates, _ = get_events_from_frame(frame, charge_scale=charge_scale, time_scale=time_scale)
@@ -231,6 +233,15 @@ def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_t
     frame['COGShiftedVertexY'] = dataclasses.I3VectorFloat(C_cog_centered[:, 1])
     frame['COGShiftedVertexZ'] = dataclasses.I3VectorFloat(C_cog_centered[:, 2])
 
+    ### Output centering and true debug information
+    frame['PrimaryXOriginal'] = dataclasses.I3Double(nu.pos.x)
+    frame['PrimaryYOriginal'] = dataclasses.I3Double(nu.pos.y)
+    frame['PrimaryZOriginal'] = dataclasses.I3Double(nu.pos.z)
+    frame['COG'] = dataclasses.I3VectorFloat(C_cog)
+    frame['COGStd'] = dataclasses.I3VectorFloat(C_cog_std)
+    frame['CMean'] = dataclasses.I3VectorFloat(C_mean)
+    frame['CStd'] = dataclasses.I3VectorFloat(C_std)
+
     ### Precompute pairwise distances for each vertex and both set of 
     distances = pairwise_distances(C_mean_centered).reshape(-1)
     distances_cog = pairwise_distances(C_cog_centered).reshape(-1)
@@ -240,10 +251,10 @@ def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_t
     distances_offset += distances.shape[0] ** 2
 
     ### Compute targets for possible auxilliary tasks, i.e. position and direction of the interaction
-    #print((nu.pos.x - C_mean[0]) / C_std[0], C_mean[0], C_std[0])
     frame['PrimaryX'] = dataclasses.I3Double((nu.pos.x - C_mean[0]) / C_std[0])
     frame['PrimaryY'] = dataclasses.I3Double((nu.pos.y - C_mean[1]) / C_std[1])
     frame['PrimaryZ'] = dataclasses.I3Double((nu.pos.z - C_mean[2]) / C_std[2])
+
     frame['COGPrimaryX'] = dataclasses.I3Double((nu.pos.x - C_cog[0]) / C_cog_std[0])
     frame['COGPrimaryY'] = dataclasses.I3Double((nu.pos.y - C_cog[1]) / C_cog_std[1])
     frame['COGPrimaryZ'] = dataclasses.I3Double((nu.pos.z - C_cog[2]) / C_cog_std[2])
@@ -286,6 +297,7 @@ def create_dataset(outfile, infiles):
         # Meta data
         'PDGEncoding', 'InteractionType', 'NumberChannels', 'NeutrinoEnergy', 
         'CascadeEnergy', 'MuonEnergy', 'TrackLength', 'DeltaLLH', 'DCFiducialPE',
+        'RunID', 'EventID',
         # Lookups
         'NumberVertices',
         # Coordinates and pairwise distances
@@ -300,6 +312,9 @@ def create_dataset(outfile, infiles):
         'RecoAzimuth', 'RecoZenith',
         # Flux weights
         'NuMuFlux', 'NueFlux', 'NoFlux',
+        # Debug stuff
+        'PrimaryXOriginal', 'PrimaryYOriginal', 'PrimaryZOriginal',
+        'COG', 'COGStd', 'CMean', 'CStd',
         ], 
                 TableService=I3HDFTableService(outfile),
                 SubEventStreams=['InIceSplit'],

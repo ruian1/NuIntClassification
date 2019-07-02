@@ -29,6 +29,7 @@
         "hidden_units_lstm" : [32, 16],
         "hidden_units_fully_connected" : [32, 1],
         "hidden_units_graph_mlp" : null,
+        "hidden_units_regression" : [64, 64, 5],
         "use_batchnorm" : true,
         "dropout_rate" : 0.5,
         "use_residual" : true

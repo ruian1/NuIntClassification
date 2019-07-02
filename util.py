@@ -139,6 +139,18 @@ def model_from_config(config):
             dropout_rate = model_config['dropout_rate'],
             use_residual = model_config['use_residual'],
         )
+    elif model_type in ('gcn_graph_features_regression', 'gcnn_graph_features_regression'):
+        model = AuxiliaryGraphConvolutionalNetworkWithGraphFeatures(
+            number_input_features,
+            len(config['dataset']['graph_features']),
+            units_graph_convolutions = model_config['hidden_units_graph_convolutions'],
+            units_fully_connected_classification = model_config['hidden_units_fully_connected'],
+            units_fully_connected_regression = model_config['hidden_units_regression'],
+            units_mlp = model_config['hidden_units_graph_mlp'],
+            use_batchnorm = model_config['use_batchnorm'],
+            dropout_rate = model_config['dropout_rate'],
+            use_residual = model_config['use_residual'],
+        )
     else:
         raise RuntimeError(f'Unkown model type {model_type}')
     return model
