@@ -2,142 +2,28 @@ import numpy as np
 import pickle
 import h5py
 from collections import defaultdict
-from .dataset import Dataset
 import tempfile
 import os
 import hashlib
+from sklearn.metrics import pairwise_distances
 
 import torch.utils.data
 
-__all__ = ['TorchHD5Dataset', 'HD5Dataset', 'RecurrentHD5Dataset']
+class ShuffledTorchHD5Dataset(torch.utils.data.Dataset):
+    """ Class to represent a pre-shuffled PyTorch dataset originating from an HD5File. """
 
-
-class TorchHD5Dataset(torch.utils.data.Dataset):
-    """ Class to wrap a dataset to be compatible with pytorches dataset loader. """
-
-    def __init__(self, dataset, type_):
-        """ Initializes the dataset wrapper. 
-        
-        Parameters:
-        -----------
-        dataset : Dataset
-            The data to be based on.
-        type_ : str
-            Either 'train', 'val' or 'test' depending on the type of the dataset.
-        """
-        self.dataset = dataset
-        self.type_ = type_
-
-    def __len__(self):
-        return self.dataset.size(self.type_)
-
-    def __getitem__(self, idx):
-        idx = self.dataset._get_idx(self.type_)[idx]
-        sample_offset = self.dataset.sample_offsets[idx]
-        distances_offset = self.dataset.distances_offsets[idx]
-        number_vertices = self.dataset.number_vertices[idx]
-        X = self.dataset.features[sample_offset : sample_offset + number_vertices]
-        D = self.dataset.distances[distances_offset : distances_offset + number_vertices ** 2].reshape((number_vertices, number_vertices))
-        y = self.dataset.targets[idx]
-        return X, D, y
-
-    def collate(self, samples):
-        """ Collator for the dataset wrapper.
-        
-        Parameters:
-        -----------
-        samples : list
-            A list of tuples representing the different inputs and targets.
-        
-        Returns:
-        --------
-        """
-        X = [sample[0] for sample in samples]
-        D = [sample[1] for sample in samples]
-        y = [sample[2] for sample in samples]
-
-        # Pad the batch
-        batch_size = len(X)
-        max_number_vertices = max(map(lambda features: features.shape[0], X))
-        num_features = X[0].shape[1]
-        features = np.zeros((batch_size, max_number_vertices, num_features))
-        distances = np.zeros((batch_size, max_number_vertices, max_number_vertices))
-        masks = np.zeros((batch_size, max_number_vertices, max_number_vertices))
-        for idx, (X_i, D_i) in enumerate(zip(X, D)):
-            features[idx, : X_i.shape[0]] = X_i
-            distances[idx, : D_i.shape[0], : D_i.shape[1]] = D_i
-            masks[idx, : X_i.shape[0], : X_i.shape[0]] = 1
-        
-        # Make torch tensors
-        if torch.cuda.is_available():
-            device = torch.device('cuda')
-        else:
-            device = torch.device('cpu')
-
-        features = torch.FloatTensor(features).to(device)
-        distances = torch.FloatTensor(distances).to(device)
-        masks = torch.FloatTensor(masks).to(device)
-        targets = torch.FloatTensor(y).to(device).unsqueeze(1)
-        return features, distances, masks, targets
-
-
-def load_chunked(hd5file, column, memmap, chunksize, column_idx=None):
-    """ Loads a column from a hd5file into a memmep chunkwise. 
-    
-    Paramters:
-    ----------
-    hd5file : hd5py.File
-        The hd5file to load from.
-    column : str
-        The column to load.
-    memmap : np.memmap, shape [N] or [N, D]
-        The memory map to load the data into.
-    chunksize : int
-        The number of rows to transfer at once.
-    column_idx : int or None
-        The column in which to insert the data.
-    """
-    column = hd5file.get(column)
-    steps = int(np.ceil(column.shape[0] / chunksize))
-    for step in range(steps):
-        idx_from, idx_to = step * chunksize, min((step + 1) * chunksize, column.shape[0])
-        print(f'\r{step} of {steps}, slice {idx_from}:{idx_to}', end='\r')
-        print('\n')
-        if column_idx is not None:
-            memmap[idx_from : idx_to, column_idx] = column[idx_from : idx_to]['item']
-        else:
-            memmap[idx_from : idx_to] = column[idx_from : idx_to]['item']
-        
-
-class HD5Dataset(Dataset):
-    """ Class to iterate over an HDF5 Dataset. """
-
-    def __init__(self, filepath, validation_portion=0.1, test_portion=0.1, shuffle=True, 
-        features=['CumulativeCharge', 'Time', 'FirstCharge'], graph_features=None, distances='Distances', 
-        seed = None, max_chunk_size=50000000, balance_dataset=False,
-        min_track_length=None, max_cascade_energy=None, memmap_directory='./memmaps'):
-        """ Initlaizes the dataset wrapper from multiple hdf5 files, each corresponding to exactly one class label.
+    def __init__(self, filepath, features=['CumulativeCharge', 'Time', 'FirstCharge'], coordinates=['VertexX', 'VertexY', 'VertexZ'], 
+        balance_dataset=False, min_track_length=None, max_cascade_energy=None, memmap_directory='./memmaps'):
+        """ Initializes the Dataset. 
         
         Parameters:
         -----------
         filepath : str
-            Path to the hdf5 datafile.
-        validation_portion : float
-            The fraction of the dataset that is kept from the model during training for validation.
-        test_portion = 0.1
-            The fraction of the dataset that is kept form the model during training and only evaulated after training has finished.
-        shuffle : bool
-            If True, the data will be shuffled randomly.
+            A path to the hd5 file.
         features : list
-            A list of feature columns that must be present as children of the root of the hdf5 file.
-        graph_features : list or None
-            A list of feature columns for each graph (instead of vertex features) that must be present as children of the root of the hdf5 file.
-        distances : str
-            The name of the column that contains pairwise distances between vertices.
-        seed : None or int  
-            The seed of the numpy shuffling if given.
-        max_cunk_size : int
-            The number of rows that are transfered into memory maps at once.
+            A list of dataset columns in the HD5 File that represent the vertex features.
+        coordinates : list
+            A list of coordinate columns in the HD5 File that represent the coordinates of each vertex.
         balance_dataset : bool
             If the dataset should be balanced such that each class contains the same number of samples.
         min_track_length : float or None
@@ -147,260 +33,353 @@ class HD5Dataset(Dataset):
         memmap_directory : str
             Directory for memmaps.
         """
-        super().__init__()
-        filepath = os.path.relpath(filepath)
-        os.makedirs(os.path.dirname(memmap_directory), exist_ok=True)
-        self.file = h5py.File(filepath, 'r')
+        self.file = h5py.File(filepath)
         self.feature_names = features
-        self.graph_feature_names = graph_features
+        self.coordinate_names = coordinates
+        self.graph_feature_names = None
 
-        self._create_targets()
-        filters = event_filter(self.file, min_track_length=min_track_length, max_cascade_energy=max_cascade_energy)
-        self._create_idx(validation_portion, test_portion, filters=filters, shuffle=shuffle, seed=seed, balanced=balance_dataset)
-
-        # Create lookup arrays for the graph size of each sample and their offsets in the feature matrix 
-        # since all the features of all graphs are stacked in one big table
-        self.number_vertices = np.array(self.file['NumberVertices']['value'], dtype = np.int32)
-        try:
-            self.sample_offsets = np.array(self.file['Offset']['value'], dtype=np.int32)
-        except:
-            self.sample_offsets = np.cumsum(self.number_vertices) - self.number_vertices
-        self.distances_offsets = self.number_vertices ** 2
-        self.distances_offsets = np.cumsum(self.distances_offsets, dtype=np.int64) - self.distances_offsets
-
-        memmap_hash = hashlib.sha1(str(self.feature_names + [filepath]).encode()).hexdigest()
-        print(f'Created sha1 hash for features and data file {memmap_hash}')
-
-        # Create memmaps in order to access the data without iterating and shuffling in place
-        feature_memmap = os.path.join(memmap_directory, f'hd5_features_{memmap_hash}')
-        if os.path.exists(feature_memmap):
-            self.features = np.memmap(feature_memmap, shape=(int(self.number_vertices.sum()), len(self.feature_names)), dtype=np.float64)
-            print(f'Loaded feature memmap {feature_memmap}.')
-        else:
-            self.features = np.memmap(feature_memmap, shape=(int(self.number_vertices.sum()), len(self.feature_names)), mode='w+', dtype=np.float64)
-            for feature_idx, feature in enumerate(self.feature_names):
-                if self.file.get(feature).shape[0] <= max_chunk_size:
-                    self.features[:, feature_idx] = self.file.get(feature)['item']
-                else:
-                    load_chunked(self.file, feature, self.features, max_chunk_size, column_idx=feature_idx)
-                print(f'Loaded feature {feature}')
-            print(f'Created feature memmap {feature_memmap}')
-        distances_memmap = os.path.join(memmap_directory, f'hd5_distances_{memmap_hash}', )
-        if os.path.exists(distances_memmap):
-            self.distances = np.memmap(distances_memmap, shape=self.file[distances].shape, dtype=np.float64)
-            print(f'Loaded distances memmap {distances_memmap}.')
-        else:
-            self.distances = np.memmap(distances_memmap, shape=self.file[distances].shape, mode='w+', dtype=np.float64)
-            if self.file[distances].shape[0] <= max_chunk_size:
-                self.distances[:] = self.file[distances]['item']
-            else:
-                load_chunked(self.file, distances, self.distances, max_chunk_size, column_idx=None)
-            print(f'Created distances memmap {distances_memmap}.')
-        if self.graph_feature_names is not None:
-            graph_feature_memmap = os.path.join(memmap_directory, f'hd5_graph_features_{memmap_hash}')
-            if os.path.exists(graph_feature_memmap):
-                self.graph_features = np.memmap(graph_feature_memmap, shape=(self.number_vertices.shape[0], len(self.graph_feature_names)), 
-                    dtype=np.float64)
-                print(f'Loaded graph feature memmap {graph_feature_memmap}')
-            else:
-                self.graph_features = np.memmap(graph_feature_memmap, shape=(self.number_vertices.shape[0], len(self.graph_feature_names)), 
-                    mode='w+', dtype=np.float64)
-                for feature_idx, feature in enumerate(self.graph_feature_names):
-                    if self.file.get(feature).shape[0] <= max_chunk_size:
-                        self.graph_features[:, feature_idx] = self.file.get(feature)['value']
-                    else:
-                        load_chunked(self.file, feature, self.graph_features, max_chunk_size, column_idx=feature_idx)
-                    print(f'Loaded graph feature {feature}')
-                print(f'Created graph feature memmap {graph_feature_memmap}')
-        self.delta_loglikelihood = np.array(self.file.get('DeltaLLH')['value'])
-
-    def _create_targets(self):
-        """ Builds the targets for classification. """
-        interaction_type = np.array(self.file['InteractionType']['value'], dtype=np.int8)
-        pdg_encoding = np.array(self.file['PDGEncoding']['value'], dtype=np.int8)
+        # Create class targets
+        interaction_type = np.array(self.file['InteractionType'], dtype=np.int8)
+        pdg_encoding = np.array(self.file['PDGEncoding'], dtype=np.int8)
         has_track = np.logical_and(np.abs(pdg_encoding) == 14, interaction_type == 1)
-        self.targets = has_track.astype(np.int)
+        targets = has_track.astype(np.int)
 
+        number_vertices = np.array(self.file['NumberVertices'])
+        event_offsets = number_vertices.cumsum() - number_vertices
 
-    def get_number_features(self):
-        """ Returns the number of features in the dataset. 
-        
-        Returns:
-        --------
-        num_features : int
-            The number of features the input graphs have.
-        """
-        return len(self.feature_names)
-
-    def get_number_graph_features(self):
-        """ Returns the number of graph features in the dataset. 
-        
-        Returns:
-        --------
-        num_features : int
-            The number of graph features.
-        """
-        if self.graph_feature_names is not None:
-            return len(self.graph_feature_names)
+        # Apply filters to the dataset
+        filter = event_filter(self.file, min_track_length=min_track_length, max_cascade_energy=max_cascade_energy)
+        if balance_dataset:
+            # Initialize numpys random seed with a hash of the filepath such that always the same indices get chosen 'randomly'
+            np.random.seed(int(hashlib.sha1(filepath.encode()).hexdigest(), 16) & 0xFFFFFFFF)
+            classes, class_counts = np.unique(targets[filter], return_counts=True)
+            min_class_size = np.min(class_counts)
+            for class_ in classes:
+                # Remove the last samples of the larger class
+                class_idx = np.where(np.logical_and((targets == class_), filter))[0]
+                np.random.shuffle(class_idx)
+                filter[class_idx[min_class_size : ]] = False
+            self._idxs = np.where(filter)[0]
+            # Assert that the class counts are the same now
+            _, class_counts = np.unique(targets[self._idxs], return_counts=True)
+            assert np.allclose(class_counts, min_class_size)
+            print(f'Reduced dataset to {min_class_size} samples per class ({self._idxs.shape[0]} / {targets.shape[0]})')
         else:
-            raise RuntimeError('Dataset has no graph features.')
+            self._idxs = np.arange(targets.shape[0])
+        self.number_vertices = number_vertices[self._idxs]
+        self.event_offsets = self.number_vertices.cumsum() - self.number_vertices
+        self.targets = targets[self._idxs]
 
-    def get_padded_batch(self, batch_idxs):
-        """ Pads a batch with zeros and creats a mask.
+        # Create memmaps for features and coordinates for faster access during training
+        os.makedirs(os.path.dirname(memmap_directory), exist_ok=True)
+
+        # Load precomputed memmaps based on the hash of the columns, filename and index set
+        self._idxs_hash = hashlib.sha1(self._idxs.data).hexdigest()
+        features_hash = hashlib.sha1(str([
+            [os.path.relpath(filepath)] + features
+        ]).encode()).hexdigest()
+        coordinates_hash = hashlib.sha1(str([
+            [os.path.relpath(filepath)] + coordinates
+        ]).encode()).hexdigest()
+
+        feature_memmap_path = os.path.join(memmap_directory, f'hd5_features_{features_hash}_{self._idxs_hash}')
+        coordinate_memmap_path = os.path.join(memmap_directory, f'hd5_coordinates_{coordinates_hash}_{self._idxs_hash}')
+
+        if not os.path.exists(feature_memmap_path) or not os.path.exists(coordinate_memmap_path):
+            # Create an index set that operates on vertex features, which is used to build memmaps efficiently
+            _vertex_idxs = np.concatenate([np.arange(start, end) for start, end in zip(self.event_offsets, self.event_offsets + self.number_vertices)]).tolist()
+        
+        if not os.path.exists(feature_memmap_path):
+            # Create a new memmap for all features
+            self.features = np.memmap(feature_memmap_path, shape=(self.number_vertices.sum(), len(self.feature_names)), dtype=np.float64, mode='w+')
+            for feature_idx, feature in enumerate(self.feature_names):
+                print(f'\rCreating column for feature {feature}', end='\r')
+                self.features[:, feature_idx] = np.array(self.file.get(feature))[_vertex_idxs]
+            print(f'\nCreated feature memmap {feature_memmap_path}')
+        else:
+            self.features = np.memmap(feature_memmap_path, shape=(self.number_vertices.sum(), len(self.feature_names)), dtype=np.float64)
+
+        if not os.path.exists(coordinate_memmap_path):
+            # Create a new memmap for all features
+            self.coordinates = np.memmap(coordinate_memmap_path, shape=(self.number_vertices.sum(), len(self.coordinate_names)), dtype=np.float64, mode='w+')
+            for coordinate_idx, coordinate in enumerate(self.coordinate_names):
+                print(f'\rCreating column for coordinate {coordinate}', end='\r')
+                self.coordinates[:, coordinate_idx] = np.array(self.file.get(coordinate))[_vertex_idxs]
+            print(f'\nCreated coordinate memmap {coordinate_memmap_path}')
+        else:
+            self.coordinates = np.memmap(coordinate_memmap_path, shape=(self.number_vertices.sum(), len(self.coordinate_names)), dtype=np.float64)
+
+        # Sanity checks
+        endpoints = self.number_vertices + self.event_offsets
+        assert(np.max(endpoints)) <= self.features.shape[0]
+
+    def __len__(self):
+        return self.number_vertices.shape[0]
+    
+    def __getitem__(self, idx):
+        N = self.number_vertices[idx]
+        offset = self.event_offsets[idx]
+        X = self.features[offset : offset + N]
+        C = self.coordinates[offset : offset + N]
+        return X, C, self.targets[idx]
+
+    @staticmethod
+    def collate(samples):
+        """ Collator for the dataset wrapper.
         
         Parameters:
         -----------
-        batch_idxs : ndarray, shape [batch_size]
-            The indices of the batch.
+        samples : list
+            A list of tuples representing the different inputs and targets.
         
         Returns:
         --------
-        features : ndarray, shape [batch_size, N_max, D]
-            The feature matrices in the batch.
-        graph_features : ndarray, shape [batch_size, F]
-            Optional: If graph features are given, the features for each graph.
-        distances : ndarray, shape [batch_size, N_max, N_max]
-            Precomputed pairwise distances for each graph.
-        masks : ndarray, shape [batch_size, N_max, N_max]
-            Adjacency matrix masks for each graph in the batch.
+        inputs : tuple
+            - X : torch.FloatTensor, shape [batch_size, N, D]
+                The vertex features.
+            - C : torch.FloatTensor, shape [batch_size, N, num_coordinates]
+                Pariwise distances.
+            - masks : torch.FloatTensor, shape [batch_size, N, N]
+                Adjacency matrix masks.
+        targets : torch.FloatTensor, shape [batch_size, N, 1]
+            Class labels.
         """
-        # Collect the features
-        padded_number_vertices = np.max(self.number_vertices[batch_idxs])
-        features = np.zeros((batch_idxs.shape[0], padded_number_vertices, len(self.feature_names)))
-        distances = np.zeros((batch_idxs.shape[0], padded_number_vertices, padded_number_vertices))
-        masks = np.zeros((batch_idxs.shape[0], padded_number_vertices, padded_number_vertices))
-        for idx, batch_idx in enumerate(batch_idxs):
-            number_vertices = self.number_vertices[batch_idx]
-            offset = self.sample_offsets[batch_idx]
-            distances_offset = self.distances_offsets[batch_idx]
-            features[idx, : number_vertices, :] = self.features[offset : offset + number_vertices]
-            distances[idx, : number_vertices, : number_vertices] = \
-                self.distances[distances_offset : distances_offset + number_vertices ** 2].reshape((number_vertices, number_vertices))
-            masks[idx, : number_vertices, : number_vertices] = 1
-        if self.graph_feature_names is not None:
-            return features, self.graph_features[[batch_idxs], :], distances, masks
+        X, C, y = zip(*samples)
+
+        # Pad the batch
+        batch_size = len(X)
+        max_number_vertices = max(map(lambda features: features.shape[0], X))
+        features = np.zeros((batch_size, max_number_vertices, X[0].shape[1]))
+        coordinates = np.zeros((batch_size, max_number_vertices, C[0].shape[1]))
+        masks = np.zeros((batch_size, max_number_vertices, max_number_vertices))
+        for idx, (X_i, C_i) in enumerate(zip(X, C)):
+            features[idx, : X_i.shape[0]] = X_i
+            coordinates[idx, : C_i.shape[0], : C_i.shape[1]] = C_i
+            masks[idx, : X_i.shape[0], : X_i.shape[0]] = 1
+        
+        # Make torch tensors
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
         else:
-            return features, distances, masks
+            device = torch.device('cpu')
 
-    
+        features = torch.FloatTensor(features).to(device)
+        coordinates = torch.FloatTensor(coordinates).to(device)
+        masks = torch.FloatTensor(masks).to(device)
+        targets = torch.FloatTensor(y).to(device).unsqueeze(1)
+        return (features, coordinates, masks), targets
 
-
-class RecurrentHD5Dataset(Dataset):
-    """ Class to iterate over an HDF5 Dataset. """
-
-    def __init__(self, filepath, validation_portion=0.1, test_portion=0.1, shuffle=True, 
-        features=['CumulativeCharge', 'Time', 'FirstCharge'], max_chunk_size=100000000, balance_dataset=False,
-        min_track_length=None, max_cascade_energy=None):
-        """ Initlaizes the dataset wrapper from multiple hdf5 files, each corresponding to exactly one class label.
+class ShuffledTorchHD5DatasetWithGraphFeatures(ShuffledTorchHD5Dataset):
+    """ Pre-shuffled PyTorch dataset that also outputs graph features. """
+    def __init__(self, filepath, features=['CumulativeCharge', 'Time', 'FirstCharge'], coordinates=['VertexX', 'VertexY', 'VertexZ'],
+        graph_features = ['RecoX', 'RecoY', 'RecoZ', 'RecoAzimuth', 'RecoZenith'], 
+        balance_dataset=False, min_track_length=None, max_cascade_energy=None, memmap_directory='./memmaps'):
+        """ Initializes the Dataset. 
         
         Parameters:
         -----------
         filepath : str
-            Path to the hdf5 datafile.
-        validation_portion : float
-            The fraction of the dataset that is kept from the model during training for validation.
-        test_portion = 0.1
-            The fraction of the dataset that is kept form the model during training and only evaulated after training has finished.
-        shuffle : bool
-            If True, the data will be shuffled randomly.
+            A path to the hd5 file.
         features : list
-            A list of feature columns that must be present as children of the root of the hdf5 file.
-        max_cunk_size : int
-            The number of rows that are transfered into memory maps at once.
+            A list of dataset columns in the HD5 File that represent the vertex features.
+        coordinates : list
+            A list of coordinate columns in the HD5 File that represent the coordinates of each vertex.
+        graph_features : list
+            A list of graph feature columns in the HD5 File that represent event features.
         balance_dataset : bool
-            If the dataset should be blanced such that each class contains the same number of samples.
+            If the dataset should be balanced such that each class contains the same number of samples.
         min_track_length : float or None
             Minimal track length all track-events must have.
         max_cascade_energy : float or None
             The maximal cascade energy all track events are allowed to have.
+        memmap_directory : str
+            Directory for memmaps.
         """
-        super().__init__()
-        self.file = h5py.File(filepath, 'r')
-        self.feature_names = features
+        super().__init__(filepath, features=features, coordinates=coordinates, balance_dataset=balance_dataset, 
+            min_track_length=min_track_length, max_cascade_energy=max_cascade_energy, memmap_directory=memmap_directory)
+        self.graph_feature_names = graph_features
 
-        self._create_targets()
-        filters = event_filter(self.file, min_track_length=min_track_length, max_cascade_energy=max_cascade_energy)
-        self._create_idx(validation_portion, test_portion, filters=filters, shuffle=shuffle, seed=seed, balanced=balance_dataset)
+        graph_features_hash = hashlib.sha1(str([
+            [os.path.relpath(filepath)] + graph_features
+        ]).encode()).hexdigest()
 
-        # Create lookup arrays for the graph size of each sample and their offsets in the feature matrix 
-        # since all the features of all graphs are stacked in one big table
-        self.number_vertices = np.array(self.file['NumberVertices']['value'], dtype = np.int64)
-        self.number_steps = np.array(self.file['NumberSteps']['value'], dtype = np.int64)
+        graph_features_memmap_path = os.path.join(memmap_directory, f'hd5_graph_features_{graph_features_hash}_{self._idxs_hash}')
 
-        # Calculate the offsets to rebuild matrices from flattened feature vectors
-        number_rows = self.number_vertices * self.number_steps
-        self.feature_offsets = np.cumsum(number_rows, dtype=np.int64) - number_rows
-        self.active_vertex = np.array(self.file['ActiveVertex']['item'], dtype=np.int)
-        self.active_vertex_offsets = np.cumsum(self.number_steps) - self.number_steps
-        self.distances_offsets = self.number_vertices ** 2
-        self.distances_offsets = np.cumsum(self.distances_offsets, dtype=np.int64) - self.distances_offsets
+        if not os.path.exists(graph_features_memmap_path):
+            # Create a new memmap for all graph features
+            self.graph_features = np.memmap(graph_features_memmap_path, shape=(self._idxs.shape[0], len(self.graph_feature_names)), dtype=np.float64, mode='w+')
+            for feature_idx, graph_feature in enumerate(self.graph_feature_names):
+                print(f'\rCreating column for graph_feature {graph_feature}', end='\r')
+                self.graph_features[:, feature_idx] = np.array(self.file.get(graph_feature))[self._idxs]
+            print(f'\nCreated feature memmap {graph_features_memmap_path}')
+        else:
+            self.graph_features = np.memmap(graph_features_memmap_path, shape=(self._idxs.shape[0], len(self.graph_feature_names)), dtype=np.float64)
 
-        # Create memmaps in order to access the data without iterating and shuffling in place
-        feature_file = tempfile.NamedTemporaryFile('w+')
-        self.features = np.memmap(feature_file.name, shape=(int((self.number_vertices * self.number_steps).sum()), len(self.feature_names)))
-        for feature_idx, feature in enumerate(self.feature_names):
-            load_chunked(self.file, feature, self.features[:, feature_idx], max_chunk_size)
-            print(f'Loaded feature {feature}')
-        distances_file = tempfile.NamedTemporaryFile('w+')
-        self.distances = np.memmap(distances_file.name, shape=self.file['Distances'].shape)
-        load_chunked(self.file, 'Distances', self.distances, max_chunk_size)
-        print('Created memory map arrays.')
-        self.delta_loglikelihood = np.array(self.file.get('DeltaLLH')['value'])
+    def __getitem__(self, idx):
+        X, C, y = super().__getitem__(idx)
+        return X, C, self.graph_features[idx], y
 
-    def _create_targets(self):
-        """ Builds the targets for classification. """
-        interaction_type = np.array(self.file['InteractionType']['value'], dtype=np.int8)
-        pdg_encoding = np.array(self.file['PDGEncoding']['value'], dtype=np.int8)
-        has_track = np.logical_and(np.abs(pdg_encoding) == 14, interaction_type == 1)
-        self.targets = has_track.astype(np.int)
-
-    def get_number_features(self):
-        """ Returns the number of features in the dataset. 
-        
-        Returns:
-        --------
-        num_features : int
-            The number of features the input graphs have.
-        """
-        return len(self.feature_names)
-
-    def get_padded_batch(self, batch_idxs):
-        """ Pads a batch with zeros and creats a mask.
+    @staticmethod
+    def collate(samples):
+        """ Collator for the dataset wrapper.
         
         Parameters:
         -----------
-        batch_idxs : ndarray, shape [batch_size]
-            The indices of the batch.
+        samples : list
+            A list of tuples representing the different inputs and targets.
         
         Returns:
         --------
-        features : ndarray, shape [batch_size, num_steps, N_max, D]
-            The feature matrices in the batch.
-        distances : ndarray, shape [batch_size, num_steps, N_max, N_max]
-            Pairwise distances.
-        masks : ndarray, shape [batch_size, num_steps, N_max, N_max]
-            Adjacency matrix masks for each graph in the batch.
+        inputs : tuple
+            - X : torch.FloatTensor, shape [batch_size, N, D]
+                The vertex features.
+            - C : torch.FloatTensor, shape [batch_size, N, num_coordinates]
+                Pariwise distances.
+            - masks : torch.FloatTensor, shape [batch_size, N, N]
+                Adjacency matrix masks.
+            - F : torch.FloatTensor, shape [batch_size, N]
+                Graph features.
+        targets : torch.FloatTensor, shape [batch_size, N, 1]
+            Class labels.
         """
-        # Calculate batch dimensions (with padding)
-        padded_number_vertices = np.max(self.number_vertices[batch_idxs])
-        padded_number_steps = np.max(self.number_steps[batch_idxs])
+        X, C, F, y = zip(*samples)
 
-        features = np.zeros((batch_idxs.shape[0], padded_number_steps, padded_number_vertices, len(self.feature_names)))
-        distances = np.zeros((batch_idxs.shape[0], padded_number_steps, padded_number_vertices, padded_number_vertices))
-        masks = np.zeros((batch_idxs.shape[0], padded_number_steps, padded_number_vertices, padded_number_vertices))
-        for idx, batch_idx in enumerate(batch_idxs):
-            number_vertices = self.number_vertices[batch_idx]
-            number_steps = self.number_steps[batch_idx]
-            offset = self.feature_offsets[batch_idx]
-            distances_offset = self.distances_offsets[batch_idx]
-            features[idx, : number_steps, : number_vertices, :] = self.features[offset : offset + (number_vertices * number_steps)].reshape(
-                (number_steps, number_vertices, -1))
-            distances[idx, : number_steps, : number_vertices, : number_vertices] = \
-                self.distances[distances_offset : distances_offset + (number_vertices ** 2)].reshape((number_vertices, number_vertices))
-            for step in range(number_steps):
-                largest_active_vertex_idx = self.active_vertex[self.active_vertex_offsets[batch_idx]]
-                masks[idx, : step, : largest_active_vertex_idx, : largest_active_vertex_idx] = 1
-        return features, distances, masks
+        # Pad the batch
+        batch_size = len(X)
+        max_number_vertices = max(map(lambda features: features.shape[0], X))
+        features = np.zeros((batch_size, max_number_vertices, X[0].shape[1]))
+        coordinates = np.zeros((batch_size, max_number_vertices, C[0].shape[1]))
+        masks = np.zeros((batch_size, max_number_vertices, max_number_vertices))
+        graph_features = np.array(F)
+        for idx, (X_i, C_i) in enumerate(zip(X, C)):
+            features[idx, : X_i.shape[0]] = X_i
+            coordinates[idx, : C_i.shape[0], : C_i.shape[1]] = C_i
+            masks[idx, : X_i.shape[0], : X_i.shape[0]] = 1
+        
+        # Make torch tensors
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+        else:
+            device = torch.device('cpu')
+
+        features = torch.FloatTensor(features).to(device)
+        coordinates = torch.FloatTensor(coordinates).to(device)
+        masks = torch.FloatTensor(masks).to(device)
+        targets = torch.FloatTensor(y).to(device).unsqueeze(1)
+        graph_features = torch.FloatTensor(graph_features).to(device)
+        return (features, coordinates, masks, graph_features), targets
+
+class ShuffledTorchHD5DatasetWithGraphFeaturesAndAuxiliaryTargets(ShuffledTorchHD5DatasetWithGraphFeatures):
+    """ Pre-shuffled PyTorch dataset that will yield graph features as well as regression targets for an auxilliary task. """
+    def __init__(self, filepath, features=['CumulativeCharge', 'Time', 'FirstCharge'], coordinates=['VertexX', 'VertexY', 'VertexZ'],
+        graph_features = ['RecoX', 'RecoY', 'RecoZ', 'RecoAzimuth', 'RecoZenith'], auxiliary_targets=[],
+        balance_dataset=False, min_track_length=None, max_cascade_energy=None, memmap_directory='./memmaps'):
+        """ Initializes the Dataset. 
+        
+        Parameters:
+        -----------
+        filepath : str
+            A path to the hd5 file.
+        features : list
+            A list of dataset columns in the HD5 File that represent the vertex features.
+        coordinates : list
+            A list of coordinate columns in the HD5 File that represent the coordinates of each vertex.
+        graph_features : list
+            A list of graph feature columns in the HD5 File that represent event features.
+        auxiliary_targets : list
+            A list of graph feature columns that are used as targets for the auxiliary regression task.
+        balance_dataset : bool
+            If the dataset should be balanced such that each class contains the same number of samples.
+        min_track_length : float or None
+            Minimal track length all track-events must have.
+        max_cascade_energy : float or None
+            The maximal cascade energy all track events are allowed to have.
+        memmap_directory : str
+            Directory for memmaps.
+        """
+        super().__init__(filepath, features=features, coordinates=coordinates, balance_dataset=balance_dataset, 
+            min_track_length=min_track_length, max_cascade_energy=max_cascade_energy, memmap_directory=memmap_directory, 
+            graph_features=graph_features)
+
+        self.auxiliary_target_names = auxiliary_targets
+
+        auxiliary_targets_hash = hashlib.sha1(str([
+            [os.path.relpath(filepath)] + auxiliary_targets
+        ]).encode()).hexdigest()
+
+        auxiliary_targets_memmap_path = os.path.join(memmap_directory, f'hd5_auxiliary_targets_{auxiliary_targets_hash}_{self._idxs_hash}')
+
+        if not os.path.exists(auxiliary_targets_memmap_path):
+            # Create a new memmap for all graph features
+            self.auxiliary_targets = np.memmap(auxiliary_targets_memmap_path, shape=(self._idxs.shape[0], len(self.auxiliary_target_names)), dtype=np.float64, mode='w+')
+            for target_idx, auxilary_target in enumerate(self.auxiliary_target_names):
+                print(f'\rCreating column for auxiliary target {auxiliary_target}', end='\r')
+                self.auxiliary_targets[:, target_idx] = np.array(self.file.get(auxilary_target))[self._idxs]
+            print(f'\nCreated auxiliary target memmap {auxiliary_targets_memmap_path}')
+        else:
+            self.auxiliary_targets = np.memmap(auxiliary_targets_memmap_path, shape=(self._idxs.shape[0], len(self.auxiliary_target_names)), dtype=np.float64)
+
+
+    def __getitem__(self, idx):
+        X, C, F, y = super().__getitem__(idx)
+        return X, C, F, y, self.auxiliary_targets[idx]
+
+    
+    @staticmethod
+    def collate(samples):
+        """ Collator for the dataset wrapper.
+        
+        Parameters:
+        -----------
+        samples : list
+            A list of tuples representing the different inputs and targets.
+        
+        Returns:
+        --------
+        inputs : tuple
+            - X : torch.FloatTensor, shape [batch_size, N, D]
+                The vertex features.
+            - C : torch.FloatTensor, shape [batch_size, N, num_coordinates]
+                Pariwise distances.
+            - masks : torch.FloatTensor, shape [batch_size, N, N]
+                Adjacency matrix masks.
+            - F : torch.FloatTensor, shape [batch_size, N]
+                Graph features.
+        targets : tuple
+            - y : torch.FloatTensor, shape [batch_size, 1]
+                Class labels.
+            - r : torch.FloatTensor, shape [batch_size, K]
+                Regression targets.
+        """
+        X, C, F, y, r  = zip(*samples)
+
+        # Pad the batch
+        batch_size = len(X)
+        max_number_vertices = max(map(lambda features: features.shape[0], X))
+        features = np.zeros((batch_size, max_number_vertices, X[0].shape[1]))
+        coordinates = np.zeros((batch_size, max_number_vertices, C[0].shape[1]))
+        masks = np.zeros((batch_size, max_number_vertices, max_number_vertices))
+        graph_features = np.array(F)
+        for idx, (X_i, C_i) in enumerate(zip(X, C)):
+            features[idx, : X_i.shape[0]] = X_i
+            coordinates[idx, : C_i.shape[0], : C_i.shape[1]] = C_i
+            masks[idx, : X_i.shape[0], : X_i.shape[0]] = 1
+        
+        # Make torch tensors
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+        else:
+            device = torch.device('cpu')
+
+        features = torch.FloatTensor(features).to(device)
+        coordinates = torch.FloatTensor(coordinates).to(device)
+        masks = torch.FloatTensor(masks).to(device)
+        targets = torch.FloatTensor(y).to(device).unsqueeze(1)
+        regression_targets = torch.FloatTensor(r).to(device)
+        graph_features = torch.FloatTensor(graph_features).to(device)
+        return (features, coordinates, masks, graph_features), (targets, regression_targets)
+
+
 
 def event_filter(file, min_track_length=None, max_cascade_energy=None):
     """ Filters events by certain requiremenents.
@@ -421,8 +400,8 @@ def event_filter(file, min_track_length=None, max_cascade_energy=None):
     filter : ndarray, shape [N], dtype=np.bool
         Only events that passed all filters are masked with True.
     """
-    track_length = np.array(file['TrackLength']['value'])
-    cascade_energy = np.array(file['CascadeEnergy']['value'])
+    track_length = np.array(file['TrackLength'])
+    cascade_energy = np.array(file['CascadeEnergy'])
     filter = np.ones(track_length.shape[0], dtype=np.bool)
     has_track_length = ~np.isnan(track_length)
 
@@ -439,12 +418,6 @@ def event_filter(file, min_track_length=None, max_cascade_energy=None):
         print(f'After Cascade Energy filter {filter.sum()} / {filter.shape[0]} events remain.')
     
     return filter
-
-
-
-
-if __name__ == '__main__':
-    HD5Dataset('../data/data_dragon_sequential.hd5')
 
 
 

@@ -25,6 +25,32 @@ def log(logfile, string):
         logfile.write(str(string) + '\n')
 
 
+def get_metrics(y_true, y_pred):
+    """ Calculates all desired metrics for a given set of predictions and ground truths.
+    
+    Parameters:
+    -----------
+    y_true : ndarray, shape [N]
+        Ground truth class labels.
+    y_pred : ndarray, shape [N]
+        Predicted class probabilities or hard labels.
+        
+    Returns:
+    --------
+    metrics : defaultdict
+        A dict containing values for all metrics. 
+    """
+    metrics = defaultdict(float)
+    metrics['accuracy'] = accuracy_score(y_true, y_pred >= .5)
+    try: 
+        metrics['auc'] = roc_auc_score(y_true, y_pred)
+    except: 
+        # AUC is not defined, if only one class is present 
+        metrics['auc'] = np.nan
+    metrics['ppr'] = (y_pred >= .5).sum() / y_pred.shape[0]
+    return metrics
+    
+
 def evaluate_model(model, data_loader, loss_function, logfile=None):
     """ Evaluates the model performance on a dataset (validation or test).
     
@@ -38,24 +64,27 @@ def evaluate_model(model, data_loader, loss_function, logfile=None):
         The loss function that is optimized.
     logfile : file-like or None
         The file to put logs into.
+
+    Returns:
+    --------
+    metrics : defaultdict(float)
+        The statistics (metrics) for the model on the given dataset.
     """
     model.eval()
     metrics = defaultdict(float)
     y_pred = np.zeros(len(data_loader.dataset))
     y_true = np.zeros(len(data_loader.dataset))
-    for batch_idx, (X, D, masks, y_i) in enumerate(data_loader):
+    total_loss = 0
+    for batch_idx, (inputs, y_i) in enumerate(data_loader):
         print(f'\rEvaluating {batch_idx + 1} / {len(data_loader)}', end='\r')
-        y_pred_i = model(X, D, masks)
+        y_pred_i = model(*inputs)
         loss = loss_function(y_pred_i, y_i)
         y_pred[batch_idx * data_loader.batch_size : (batch_idx + 1) * data_loader.batch_size] = y_pred_i.data.cpu().numpy().squeeze()
         y_true[batch_idx * data_loader.batch_size : (batch_idx + 1) * data_loader.batch_size] = y_i.data.cpu().numpy().squeeze()
-        metrics['loss'] += loss.item()
+        total_loss += loss.item()
 
-    metrics['loss'] /= len(data_loader)
-    metrics['accuracy'] = accuracy_score(y_true, y_pred >= .5)
-    metrics['f1'] = f1_score(y_true, y_pred >= .5)
-    metrics['auc'] = roc_auc_score(y_true, y_pred)
-    metrics['ppr'] = (y_pred >= .5).sum() / y_pred.shape[0]
+    metrics = get_metrics(y_true, y_pred)
+    metrics['loss'] = total_loss / len(data_loader)
     
     values = ' -- '.join(map(lambda metric: f'{metric} : {(metrics[metric]):.4f}', metrics))
     log(logfile, f'\nMetrics: {values}')
@@ -97,9 +126,11 @@ if __name__ == '__main__':
     os.makedirs(training_dir, exist_ok=True)
 
     # Create a seed if non given
-    if settings['dataset']['seed'] is None:
-        settings['dataset']['seed'] = model_idx
-        print('Seeded with the model id ({model_idx}')
+    if settings['seed'] is None:
+        settings['seed'] = model_idx
+        print(f'Seeded with the model id ({model_idx})')
+
+    np.random.seed(settings['seed'] & 0xFFFFFFFF)
 
     # Save a copy of the settings
     with open(os.path.join(training_dir, 'config.json'), 'w+') as f:
@@ -107,61 +138,78 @@ if __name__ == '__main__':
     
     # Load data
     batch_size = settings['training']['batch_size']
-    data = util.dataset_from_config(settings)
-    data_train = TorchHD5Dataset(data, 'train')
-    train_loader = DataLoader(data_train, batch_size=batch_size, shuffle=False, collate_fn=data_train.collate)
-    data_val = TorchHD5Dataset(data, 'val')
-    val_loader = DataLoader(data_val, batch_size=batch_size, shuffle=False, collate_fn=data_val.collate)
-    data_test = TorchHD5Dataset(data, 'test')
-    test_loader = DataLoader(data_test, batch_size=batch_size, shuffle=False, collate_fn=data_test.collate)
+
+    data_train, data_val, data_test = util.dataset_from_config(settings)
+    train_loader = DataLoader(data_train, batch_size=batch_size, shuffle=settings['dataset']['shuffle'], collate_fn=data_train.collate, drop_last=False)
+    val_loader = DataLoader(data_val, batch_size=batch_size, shuffle=settings['dataset']['shuffle'], collate_fn=data_val.collate, drop_last=False)
+    test_loader = DataLoader(data_test, batch_size=batch_size, shuffle=settings['dataset']['shuffle'], collate_fn=data_test.collate, drop_last=False)
 
     model = util.model_from_config(settings)
     if torch.cuda.is_available():
         model = model.cuda()
         log(logfile, "Training on GPU")
         log(logfile, "GPU type:\n{}".format(torch.cuda.get_device_name(0)))
-    loss_function = nn.functional.binary_cross_entropy
+    if settings['training']['loss'].lower() == 'binary_crossentropy':
+        loss_function = nn.functional.binary_cross_entropy
+    else:
+        raise RuntimeError(f'Unkown loss {settings["training"]["loss"]}')
 
     optimizer = torch.optim.Adamax(model.parameters(), lr=settings['training']['learning_rate'])
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max')
-    metrics = defaultdict(list)
+    lr_scheduler_type = settings['training']['learning_rate_scheduler']
+    if lr_scheduler_type.lower() == 'reduce_on_plateau':
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', 
+        patience=settings['training']['learning_rate_scheduler_patience'], min_lr=settings['training']['min_learning_rate'])
+    elif lr_scheduler_type.lower() == 'exponential_decay':
+        lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, settings['training']['learning_rate_decay'])
+    else:
+        raise RuntimeError(f'Unkown learning rate scheduler strategy {lr_scheduler_type}')
+
+    validation_metrics = defaultdict(list)
+    training_metrics = defaultdict(list)
 
     epochs = settings['training']['epochs']
     for epoch in range(epochs):
-        print(f'\nEpoch {epoch + 1} / {epochs}')
-        epoch_loss = 0
-        epoch_accuracy = 0
+        print(f'\nEpoch {epoch + 1} / {epochs}, learning rate: {optimizer.param_groups[0]["lr"]}')
+        running_loss = 0
+        running_accuracy = 0
         model.train()
         t0 = time.time()
-        for batch_idx, (X, D, masks, y) in enumerate(train_loader):
+        for batch_idx, (inputs, y) in enumerate(train_loader):
             optimizer.zero_grad()
-            y_pred = model(X, D, masks)
+            y_pred = model(*inputs)
             loss = loss_function(y_pred, y)
             loss.backward()
             optimizer.step()
-            epoch_loss += loss.item()
+            running_loss += loss.item()
             y = y.data.cpu().numpy()
             y_pred = y_pred.data.cpu().numpy()
-            y_pred = (y_pred >= .5).astype(np.int)
-            epoch_accuracy += (y == y_pred).sum() / y.shape[0]
+            batch_metrics = get_metrics(y, y_pred)
+            for metric, value in batch_metrics.items():
+                training_metrics[metric].append(value)
+            running_accuracy += batch_metrics['accuracy']
+            # Estimate ETA
             dt = time.time() - t0
             eta = dt * (len(train_loader) / (batch_idx + 1) - 1)
 
-            print(f'\r{batch_idx + 1} / {len(train_loader)}: batch_loss {loss.item():.4f} -- epoch_loss {epoch_loss / (batch_idx + 1):.4f} -- epoch acc {epoch_accuracy / (batch_idx + 1):.4f} -- mean of preds {y_pred.mean():.4f} # ETA: {int(eta):6}s      ', end='\r')
-            # Save model parameters
-            checkpoint_path = os.path.join(training_dir, f'model_{epoch + 1}')
-            torch.save(model.state_dict(), checkpoint_path)
-            log(logfile, f'Saved model to {checkpoint_path}')
+            print(f'\r{batch_idx + 1} / {len(train_loader)}: batch_loss {loss.item():.4f} -- epoch_loss {running_loss / (batch_idx + 1):.4f} -- epoch acc {running_accuracy / (batch_idx + 1):.4f} -- mean of preds / targets {y_pred.mean():.4f} / {y.mean():.4f} # ETA: {int(eta):6}s      ', end='\r')
 
+        # Validation
         log(logfile, '\n### Validation:')    
         for metric, value in evaluate_model(model, val_loader, loss_function, logfile=logfile).items():
-            metrics[metric].append(value)
+            validation_metrics[metric].append(value)
+        # Update learning rate, scheduler uses last accuracy as cirterion
+        lr_scheduler.step(validation_metrics['accuracy'][-1])
+
+        # Save model parameters
+        checkpoint_path = os.path.join(training_dir, f'model_{epoch + 1}')
+        torch.save(model.state_dict(), checkpoint_path)
+        log(logfile, f'Saved model to {checkpoint_path}')
     
     log(logfile, '\n### Testing:')
-    metrics_testing = evaluate_model(model, test_loader, loss_function, logfile=logfile)
+    testing_metrics = evaluate_model(model, test_loader, loss_function, logfile=logfile)
 
     with open(os.path.join(training_dir, 'stats.pkl'), 'wb') as f:
-        pickle.dump({'val' : metrics, 'test' : metrics_testing}, f)
+        pickle.dump({'train': training_metrics, 'val' : validation_metrics, 'test' : testing_metrics}, f)
 
     if logfile is not None:
         logfile.close()

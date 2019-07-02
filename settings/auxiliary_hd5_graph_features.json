@@ -1,6 +1,6 @@
 {
     "dataset" : {
-        "type" : "hd5_graph_features",
+        "type" : "hd5_graph_features_regression",
         "paths" : {
             "train" : "../data/data_dragon6_shuffled/train.hd5",
             "validation" : "../data/data_dragon6_shuffled/val.hd5",
@@ -26,10 +26,11 @@
         "max_cascade_energy" : 10
     },
     "model" : {
-        "type" : "gcn_graph_features",
-        "hidden_units_graph_convolutions" : [128, 128, 128, 128, 128, 128],
+        "type" : "gcn_graph_features_regression",
+        "hidden_units_graph_convolutions" : [64, 64, 64, 64, 64, 64, 64],
         "hidden_units_fully_connected" : [64, 64, 64, 64, 1],
         "hidden_units_graph_mlp" : [64, 64, 64],
+        "hidden_units_regression" : [64, 64, 64, 5],
         "use_batchnorm" : true,
         "use_residual" : true,
         "dropout_rate" : 0.5

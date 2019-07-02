@@ -1,0 +1,16 @@
+universe = vanilla
+log = log/gcnn_grid_$(Item).log
+error = log/gcnn_grid_$(Item).err
+output = log/gcnn_grid_$(Item).out
+
+executable = gcnn_grid_condor.sh
+arguments = $(Item)
+
+should_transfer_files = YES
+when_to_transfer_output = ON_EXIT
+
+request_cpus = 1
+request_memory = 16GB
+request_gpus = 1
+
+queue from seq 0 1 2 |
