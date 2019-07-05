@@ -8,7 +8,6 @@
         },
         "features" : [
             "TimeFirstPulseShifted", "TimeLastPulseShifted", "TimeMaxPulseShifted", "TimeStdShifted",
-            "ChargeFirstPulse", "ChargeLastPulse", "ChargeMaxPulse",
             "TimeFirstPulse", "TimeLastPulse", "TimeMaxPulse", "TimeStd",
             "COGShiftedVertexX", "COGShiftedVertexY", "COGShiftedVertexZ",
             "VertexX", "VertexY", "VertexZ"
@@ -20,23 +19,28 @@
             "COGShiftedVertexX", "COGShiftedVertexY", "COGShiftedVertexZ"
         ],
         "shuffle" : false,
-        "max_charge" : null,
         "balance_classes" : true,
         "min_track_length" : 70,
-        "max_cascade_energy" : 10
+        "max_cascade_energy" : 10,
+        "flavors" : [
+            12, 14
+        ],
+        "currents" : [
+            1
+        ]
     },
     "model" : {
         "type" : "gcn_graph_features",
-        "hidden_units_graph_convolutions" : [128, 128, 128, 128, 128, 128],
-        "hidden_units_fully_connected" : [64, 64, 64, 64, 1],
+        "hidden_units_graph_convolutions" : [64, 64, 64, 64, 64],
+        "hidden_units_fully_connected" : [64, 1],
         "hidden_units_graph_mlp" : [64, 64, 64],
         "use_batchnorm" : true,
         "use_residual" : true,
         "dropout_rate" : 0.5
     },
     "training" : {
-        "learning_rate" : 1e-2,
-        "learning_rate_scheduler_patience" : 3,
+        "learning_rate" : 1e-3,
+        "learning_rate_scheduler_patience" : 2,
         "batch_size" : 64,
         "epochs" : 25,
         "directory" : "./training/hd5-{0}",

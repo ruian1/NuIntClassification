@@ -24,13 +24,17 @@ def dict_update(d, u):
         else:
             raise RuntimeError(f'Unkown setting {key}')
 
-def dataset_from_config(config):
+def dataset_from_config(config, filter_non_train=False, close_file=True):
     """ Creates a dataset from a configuration file. 
     
     Parameters:
     -----------
     config : dict
         The configuration dict.
+    filter_non_train : bool
+        If true, the validation and testing data set are filtered.
+    close_file : bool
+        If True, hd5 files will be closed after readout.
     
     Returns:
     --------
@@ -52,22 +56,34 @@ def dataset_from_config(config):
             balance_dataset = dataset_config['balance_classes'],
             min_track_length = dataset_config['min_track_length'],
             max_cascade_energy = dataset_config['max_cascade_energy'],
+            flavors = dataset_config['flavors'],
+            currents = dataset_config['currents'],
+            class_weights = dataset_config['class_weights'],
+            close_file = close_file,
             )
         val = ShuffledTorchHD5Dataset(
             dataset_config['paths']['validation'],
             features = dataset_config['features'],
             coordinates = dataset_config['coordinates'],
             balance_dataset = False,
-            min_track_length = None,
-            max_cascade_energy = None,
+            min_track_length = dataset_config['min_track_length'] if filter_non_train else None,
+            max_cascade_energy = dataset_config['max_cascade_energy'] if filter_non_train else None,
+            flavors = dataset_config['flavors'] if filter_non_train else None,
+            currents = dataset_config['currents'] if filter_non_train else None,
+            class_weights = dataset_config['class_weights'],
+            close_file = close_file,
             )
         test = ShuffledTorchHD5Dataset(
             dataset_config['paths']['test'],
             features = dataset_config['features'],
             coordinates = dataset_config['coordinates'],
             balance_dataset = False,
-            min_track_length = None,
-            max_cascade_energy = None,
+            min_track_length = dataset_config['min_track_length'] if filter_non_train else None,
+            max_cascade_energy = dataset_config['max_cascade_energy'] if filter_non_train else None,
+            flavors = dataset_config['flavors'] if filter_non_train else None,
+            currents = dataset_config['currents'] if filter_non_train else None,
+            class_weights = dataset_config['class_weights'],
+            close_file = close_file,
             )
         return train, val, test
     elif dataset_type in ('hdf5_graph_features', 'hd5_graph_features'):
@@ -79,6 +95,10 @@ def dataset_from_config(config):
             balance_dataset = dataset_config['balance_classes'],
             min_track_length = dataset_config['min_track_length'],
             max_cascade_energy = dataset_config['max_cascade_energy'],
+            flavors = dataset_config['flavors'],
+            currents = dataset_config['currents'],
+            class_weights = dataset_config['class_weights'],
+            close_file = close_file,
             )
         val = ShuffledTorchHD5DatasetWithGraphFeatures(
             dataset_config['paths']['validation'],
@@ -86,8 +106,12 @@ def dataset_from_config(config):
             coordinates = dataset_config['coordinates'],
             graph_features = dataset_config['graph_features'],
             balance_dataset = False,
-            min_track_length = None,
-            max_cascade_energy = None,
+            min_track_length = dataset_config['min_track_length'] if filter_non_train else None,
+            max_cascade_energy = dataset_config['max_cascade_energy'] if filter_non_train else None,
+            flavors = dataset_config['flavors'] if filter_non_train else None,
+            currents = dataset_config['currents'] if filter_non_train else None,
+            class_weights = dataset_config['class_weights'],
+            close_file = close_file,
             )
         test = ShuffledTorchHD5DatasetWithGraphFeatures(
             dataset_config['paths']['test'],
@@ -95,8 +119,12 @@ def dataset_from_config(config):
             coordinates = dataset_config['coordinates'],
             graph_features = dataset_config['graph_features'],
             balance_dataset = False,
-            min_track_length = None,
-            max_cascade_energy = None,
+            min_track_length = dataset_config['min_track_length'] if filter_non_train else None,
+            max_cascade_energy = dataset_config['max_cascade_energy'] if filter_non_train else None,
+            flavors = dataset_config['flavors'] if filter_non_train else None,
+            currents = dataset_config['currents'] if filter_non_train else None,
+            class_weights = dataset_config['class_weights'],
+            close_file = close_file,
             )
         return train, val, test
     else:
@@ -112,8 +140,8 @@ def model_from_config(config):
     
     Returns:
     --------
-    model : keras.models.Model
-        A keras model.
+    model : torch.nn.model
+        A PyTorch model.
     """
     number_input_features = len(config['dataset']['features'])
     model_config = config['model']

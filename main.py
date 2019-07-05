@@ -75,10 +75,10 @@ def evaluate_model(model, data_loader, loss_function, logfile=None):
     y_pred = np.zeros(len(data_loader.dataset))
     y_true = np.zeros(len(data_loader.dataset))
     total_loss = 0
-    for batch_idx, (inputs, y_i) in enumerate(data_loader):
+    for batch_idx, (inputs, y_i, weights) in enumerate(data_loader):
         print(f'\rEvaluating {batch_idx + 1} / {len(data_loader)}', end='\r')
         y_pred_i = model(*inputs)
-        loss = loss_function(y_pred_i, y_i)
+        loss = loss_function(y_pred_i, y_i, weights)
         y_pred[batch_idx * data_loader.batch_size : (batch_idx + 1) * data_loader.batch_size] = y_pred_i.data.cpu().numpy().squeeze()
         y_true[batch_idx * data_loader.batch_size : (batch_idx + 1) * data_loader.batch_size] = y_i.data.cpu().numpy().squeeze()
         total_loss += loss.item()
@@ -174,16 +174,16 @@ if __name__ == '__main__':
         running_accuracy = 0
         model.train()
         t0 = time.time()
-        for batch_idx, (inputs, y) in enumerate(train_loader):
+        for batch_idx, (inputs, targets, weights) in enumerate(train_loader):
             optimizer.zero_grad()
             y_pred = model(*inputs)
-            loss = loss_function(y_pred, y)
+            loss = loss_function(y_pred, targets, weight=weights)
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
-            y = y.data.cpu().numpy()
+            targets = targets.data.cpu().numpy()
             y_pred = y_pred.data.cpu().numpy()
-            batch_metrics = get_metrics(y, y_pred)
+            batch_metrics = get_metrics(targets, y_pred)
             for metric, value in batch_metrics.items():
                 training_metrics[metric].append(value)
             running_accuracy += batch_metrics['accuracy']
@@ -191,7 +191,7 @@ if __name__ == '__main__':
             dt = time.time() - t0
             eta = dt * (len(train_loader) / (batch_idx + 1) - 1)
 
-            print(f'\r{batch_idx + 1} / {len(train_loader)}: batch_loss {loss.item():.4f} -- epoch_loss {running_loss / (batch_idx + 1):.4f} -- epoch acc {running_accuracy / (batch_idx + 1):.4f} -- mean of preds / targets {y_pred.mean():.4f} / {y.mean():.4f} # ETA: {int(eta):6}s      ', end='\r')
+            print(f'\r{batch_idx + 1} / {len(train_loader)}: batch_loss {loss.item():.4f} -- epoch_loss {running_loss / (batch_idx + 1):.4f} -- epoch acc {running_accuracy / (batch_idx + 1):.4f} -- mean of preds / targets {y_pred.mean():.4f} / {targets.mean():.4f} # ETA: {int(eta):6}s      ', end='\r')
 
         # Validation
         log(logfile, '\n### Validation:')    

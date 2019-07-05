@@ -19,6 +19,9 @@
         "coordinates" : [
             "COGShiftedVertexX", "COGShiftedVertexY", "COGShiftedVertexZ"
         ],
+        "regression_targets" : [
+            ""
+        ],
         "shuffle" : false,
         "max_charge" : null,
         "balance_classes" : true,

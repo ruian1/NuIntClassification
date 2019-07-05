@@ -36,6 +36,8 @@ def create_dataset(f, idxs, dir, prefix, column_types):
             elif column_types[key] == 'distance':
                 shape = (N_distances,)
                 column = 'item'
+            elif column_types[key] == 'debug':
+                shape = (N_events * 3,)
             else:
                 raise RuntimeError('Unkown column type for key {key}: {column_types[key]}')
             columns[column_types[key]].append(key)
@@ -53,7 +55,7 @@ def create_dataset(f, idxs, dir, prefix, column_types):
 
         # Type 'Vertex'
         for key in columns['vertex']:
-            print(f'\rCopying {key}...', end='\n')
+            print(f'\rCopying {key}...', end='\r')
             data = np.array(f[key]['item'])[vertex_idxs]
             out[key][:] = data
 
@@ -61,17 +63,22 @@ def create_dataset(f, idxs, dir, prefix, column_types):
         print(f'Copying data for column type \'event\'')
         # Events fit into memory
         for key in columns['event']:
-            print(f'\rCopying {key}...', end='\n')
+            print(f'\rCopying {key}...', end='\r')
             data = np.array(f[key]['value'])[idxs]
             out[key][:] = data
 
-
+        # Type: 'Debug', coordinates with 3 values
+        print(f'Copying data for column type \'debug\'')
+        for key in columns['debug']:
+            print(f'\rCopying {key}...', end='\r')
+            data = np.array(f[key]['item']).reshape((-1, 3))[idxs]
+            out[key][:] = data.reshape((-1))
 
         
 
 if __name__ == '__main__':
-    input = '../data/data_dragon6.hd5'
-    output = '../data/data_dragon6_split'
+    input = '../data/data_dragon7.hd5'
+    output = '../data/data_dragon7_split'
 
     os.makedirs(output, exist_ok=True)
 
@@ -90,6 +97,8 @@ if __name__ == '__main__':
                 column_types[key] = 'vertex'
             elif N_col == N_vertices_squared:
                 column_types[key] = 'distance'
+            elif N_col == N_events * 3:
+                column_types[key] = 'debug'
             else:
                 raise RuntimeError(f'Unkown column type for key {key} with shape {N_col}')
 
