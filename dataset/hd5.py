@@ -6,6 +6,7 @@ import tempfile
 import os
 import hashlib
 from sklearn.metrics import pairwise_distances
+from sklearn.utils.class_weight import compute_sample_weight
 
 import torch.utils.data
 
@@ -13,7 +14,9 @@ class ShuffledTorchHD5Dataset(torch.utils.data.Dataset):
     """ Class to represent a pre-shuffled PyTorch dataset originating from an HD5File. """
 
     def __init__(self, filepath, features=['CumulativeCharge', 'Time', 'FirstCharge'], coordinates=['VertexX', 'VertexY', 'VertexZ'], 
-        balance_dataset=False, min_track_length=None, max_cascade_energy=None, memmap_directory='./memmaps'):
+        balance_dataset=False, min_track_length=None, max_cascade_energy=None, flavors=None, currents=None,
+        memmap_directory='./memmaps', close_file=True, 
+        class_weights=None):
         """ Initializes the Dataset. 
         
         Parameters:
@@ -30,8 +33,16 @@ class ShuffledTorchHD5Dataset(torch.utils.data.Dataset):
             Minimal track length all track-events must have.
         max_cascade_energy : float or None
             The maximal cascade energy all track events are allowed to have.
+        flavors : list or None
+            Only certain neutrino flavor events will be considered if given.
+        currents : list or None
+            Only certain current events will be considered if given. 
         memmap_directory : str
             Directory for memmaps.
+        close_file : bool
+            If True, the hd5 file will be closed afterwards.
+        class_weights : dict or None
+            Weights for each class.
         """
         self.file = h5py.File(filepath)
         self.feature_names = features
@@ -48,7 +59,7 @@ class ShuffledTorchHD5Dataset(torch.utils.data.Dataset):
         event_offsets = number_vertices.cumsum() - number_vertices
 
         # Apply filters to the dataset
-        filter = event_filter(self.file, min_track_length=min_track_length, max_cascade_energy=max_cascade_energy)
+        filter = event_filter(self.file, min_track_length=min_track_length, max_cascade_energy=max_cascade_energy, flavors=flavors, currents=currents)
         if balance_dataset:
             # Initialize numpys random seed with a hash of the filepath such that always the same indices get chosen 'randomly'
             np.random.seed(int(hashlib.sha1(filepath.encode()).hexdigest(), 16) & 0xFFFFFFFF)
@@ -65,7 +76,8 @@ class ShuffledTorchHD5Dataset(torch.utils.data.Dataset):
             assert np.allclose(class_counts, min_class_size)
             print(f'Reduced dataset to {min_class_size} samples per class ({self._idxs.shape[0]} / {targets.shape[0]})')
         else:
-            self._idxs = np.arange(targets.shape[0])
+            self._idxs = np.where(filter)[0]
+        print(number_vertices.shape, self._idxs.shape)
         self.number_vertices = number_vertices[self._idxs]
         self.event_offsets = self.number_vertices.cumsum() - self.number_vertices
         self.targets = targets[self._idxs]
@@ -109,9 +121,19 @@ class ShuffledTorchHD5Dataset(torch.utils.data.Dataset):
         else:
             self.coordinates = np.memmap(coordinate_memmap_path, shape=(self.number_vertices.sum(), len(self.coordinate_names)), dtype=np.float64)
 
+        # Compute weights, if a dictionary is given, string keys must be converted to int keys
+        if isinstance(class_weights, dict):
+            class_weights = {int(class_) : weight for class_, weight in class_weights.items()}
+        self.weights = compute_sample_weight(class_weights, self.targets)
+        print(self.weights.shape)
+
         # Sanity checks
         endpoints = self.number_vertices + self.event_offsets
         assert(np.max(endpoints)) <= self.features.shape[0]
+
+        if close_file:
+            self.file.close()
+            self.file = filepath
 
     def __len__(self):
         return self.number_vertices.shape[0]
@@ -121,7 +143,7 @@ class ShuffledTorchHD5Dataset(torch.utils.data.Dataset):
         offset = self.event_offsets[idx]
         X = self.features[offset : offset + N]
         C = self.coordinates[offset : offset + N]
-        return X, C, self.targets[idx]
+        return X, C, self.targets[idx], self.weights[idx]
 
     @staticmethod
     def collate(samples):
@@ -141,10 +163,13 @@ class ShuffledTorchHD5Dataset(torch.utils.data.Dataset):
                 Pariwise distances.
             - masks : torch.FloatTensor, shape [batch_size, N, N]
                 Adjacency matrix masks.
-        targets : torch.FloatTensor, shape [batch_size, N, 1]
-            Class labels.
+        outputs : tuple
+            - torch.FloatTensor, shape [batch_size, N, 1]
+                Class labels.
+        weights : torch.FloatTensor, shape [batch_size] or None
+            Weights for each sample.
         """
-        X, C, y = zip(*samples)
+        X, C, y, w = zip(*samples)
 
         # Pad the batch
         batch_size = len(X)
@@ -167,13 +192,15 @@ class ShuffledTorchHD5Dataset(torch.utils.data.Dataset):
         coordinates = torch.FloatTensor(coordinates).to(device)
         masks = torch.FloatTensor(masks).to(device)
         targets = torch.FloatTensor(y).to(device).unsqueeze(1)
-        return (features, coordinates, masks), targets
+        weights = torch.FloatTensor(w).to(device).unsqueeze(1)
+        return (features, coordinates, masks), targets, weights
 
 class ShuffledTorchHD5DatasetWithGraphFeatures(ShuffledTorchHD5Dataset):
     """ Pre-shuffled PyTorch dataset that also outputs graph features. """
     def __init__(self, filepath, features=['CumulativeCharge', 'Time', 'FirstCharge'], coordinates=['VertexX', 'VertexY', 'VertexZ'],
         graph_features = ['RecoX', 'RecoY', 'RecoZ', 'RecoAzimuth', 'RecoZenith'], 
-        balance_dataset=False, min_track_length=None, max_cascade_energy=None, memmap_directory='./memmaps'):
+        balance_dataset=False, min_track_length=None, max_cascade_energy=None, flavors=None, currents=None,
+        memmap_directory='./memmaps', close_file=True, class_weights=None):
         """ Initializes the Dataset. 
         
         Parameters:
@@ -192,11 +219,21 @@ class ShuffledTorchHD5DatasetWithGraphFeatures(ShuffledTorchHD5Dataset):
             Minimal track length all track-events must have.
         max_cascade_energy : float or None
             The maximal cascade energy all track events are allowed to have.
+        flavors : list or None
+            Only certain neutrino flavor events will be considered if given.
+        currents : list or None
+            Only certain current events will be considered if given. 
         memmap_directory : str
             Directory for memmaps.
+        close_file : bool
+            If True, the hd5 file will be closed after readout.
+        class_weights : dict or None
+            Weights for each class.
         """
         super().__init__(filepath, features=features, coordinates=coordinates, balance_dataset=balance_dataset, 
-            min_track_length=min_track_length, max_cascade_energy=max_cascade_energy, memmap_directory=memmap_directory)
+            min_track_length=min_track_length, max_cascade_energy=max_cascade_energy, flavors=flavors, currents=currents,
+            memmap_directory=memmap_directory, 
+            close_file=False, class_weights=class_weights)
         self.graph_feature_names = graph_features
 
         graph_features_hash = hashlib.sha1(str([
@@ -215,9 +252,13 @@ class ShuffledTorchHD5DatasetWithGraphFeatures(ShuffledTorchHD5Dataset):
         else:
             self.graph_features = np.memmap(graph_features_memmap_path, shape=(self._idxs.shape[0], len(self.graph_feature_names)), dtype=np.float64)
 
+        if close_file:
+            self.file.close()
+            self.file = filepath
+
     def __getitem__(self, idx):
-        X, C, y = super().__getitem__(idx)
-        return X, C, self.graph_features[idx], y
+        X, C, y, w = super().__getitem__(idx)
+        return X, C, self.graph_features[idx], y, w
 
     @staticmethod
     def collate(samples):
@@ -239,10 +280,13 @@ class ShuffledTorchHD5DatasetWithGraphFeatures(ShuffledTorchHD5Dataset):
                 Adjacency matrix masks.
             - F : torch.FloatTensor, shape [batch_size, N]
                 Graph features.
-        targets : torch.FloatTensor, shape [batch_size, N, 1]
-            Class labels.
+        outputs : tuple
+            - targets : torch.FloatTensor, shape [batch_size, N, 1]
+                Class labels.
+        weights : torch.FloatTensor, shape [batch_size] or None
+            Sample weights
         """
-        X, C, F, y = zip(*samples)
+        X, C, F, y, w = zip(*samples)
 
         # Pad the batch
         batch_size = len(X)
@@ -267,13 +311,15 @@ class ShuffledTorchHD5DatasetWithGraphFeatures(ShuffledTorchHD5Dataset):
         masks = torch.FloatTensor(masks).to(device)
         targets = torch.FloatTensor(y).to(device).unsqueeze(1)
         graph_features = torch.FloatTensor(graph_features).to(device)
-        return (features, coordinates, masks, graph_features), targets
+        weights = torch.FloatTensor(w).to(device).unsqueeze(1)
+        return (features, coordinates, masks, graph_features), targets, weights
 
 class ShuffledTorchHD5DatasetWithGraphFeaturesAndAuxiliaryTargets(ShuffledTorchHD5DatasetWithGraphFeatures):
     """ Pre-shuffled PyTorch dataset that will yield graph features as well as regression targets for an auxilliary task. """
     def __init__(self, filepath, features=['CumulativeCharge', 'Time', 'FirstCharge'], coordinates=['VertexX', 'VertexY', 'VertexZ'],
         graph_features = ['RecoX', 'RecoY', 'RecoZ', 'RecoAzimuth', 'RecoZenith'], auxiliary_targets=[],
-        balance_dataset=False, min_track_length=None, max_cascade_energy=None, memmap_directory='./memmaps'):
+        balance_dataset=False, min_track_length=None, max_cascade_energy=None, flavors=None, currents=None,
+        memmap_directory='./memmaps', close_file=True, class_weights=None):
         """ Initializes the Dataset. 
         
         Parameters:
@@ -294,12 +340,21 @@ class ShuffledTorchHD5DatasetWithGraphFeaturesAndAuxiliaryTargets(ShuffledTorchH
             Minimal track length all track-events must have.
         max_cascade_energy : float or None
             The maximal cascade energy all track events are allowed to have.
+        flavors : list or None
+            Only certain neutrino flavor events will be considered if given.
+        currents : list or None
+            Only certain current events will be considered if given. 
         memmap_directory : str
             Directory for memmaps.
+        close_file : bool
+            If True, the hd5 will be closed after readout.
+        class_weights : dict or None
+            Weights for each class.
         """
         super().__init__(filepath, features=features, coordinates=coordinates, balance_dataset=balance_dataset, 
-            min_track_length=min_track_length, max_cascade_energy=max_cascade_energy, memmap_directory=memmap_directory, 
-            graph_features=graph_features)
+            min_track_length=min_track_length, max_cascade_energy=max_cascade_energy, flavors=flavors, currents=currents,
+            memmap_directory=memmap_directory, 
+            graph_features=graph_features, close_file=False, class_weights=class_weights)
 
         self.auxiliary_target_names = auxiliary_targets
 
@@ -319,10 +374,13 @@ class ShuffledTorchHD5DatasetWithGraphFeaturesAndAuxiliaryTargets(ShuffledTorchH
         else:
             self.auxiliary_targets = np.memmap(auxiliary_targets_memmap_path, shape=(self._idxs.shape[0], len(self.auxiliary_target_names)), dtype=np.float64)
 
+        if close_file:
+            self.file.close()
+            self.file = filepath
 
     def __getitem__(self, idx):
-        X, C, F, y = super().__getitem__(idx)
-        return X, C, F, y, self.auxiliary_targets[idx]
+        X, C, F, y, w = super().__getitem__(idx)
+        return X, C, F, y, self.auxiliary_targets[idx], w
 
     
     @staticmethod
@@ -346,12 +404,15 @@ class ShuffledTorchHD5DatasetWithGraphFeaturesAndAuxiliaryTargets(ShuffledTorchH
             - F : torch.FloatTensor, shape [batch_size, N]
                 Graph features.
         targets : tuple
-            - y : torch.FloatTensor, shape [batch_size, 1]
-                Class labels.
-            - r : torch.FloatTensor, shape [batch_size, K]
-                Regression targets.
+            - targets : tuple
+                - y : torch.FloatTensor, shape [batch_size, 1]
+                    Class labels.
+                - r : torch.FloatTensor, shape [batch_size, K]
+                    Regression targets.
+            - w : torch.FloatTensor, shape [batch_size]
+                Sample weights.
         """
-        X, C, F, y, r  = zip(*samples)
+        X, C, F, y, r, w  = zip(*samples)
 
         # Pad the batch
         batch_size = len(X)
@@ -377,11 +438,10 @@ class ShuffledTorchHD5DatasetWithGraphFeaturesAndAuxiliaryTargets(ShuffledTorchH
         targets = torch.FloatTensor(y).to(device).unsqueeze(1)
         regression_targets = torch.FloatTensor(r).to(device)
         graph_features = torch.FloatTensor(graph_features).to(device)
-        return (features, coordinates, masks, graph_features), (targets, regression_targets)
+        weights = torch.FloatTensor(w).to(device).unsqueeze(1)
+        return (features, coordinates, masks, graph_features), (targets, regression_targets), weights
 
-
-
-def event_filter(file, min_track_length=None, max_cascade_energy=None):
+def event_filter(file, min_track_length=None, max_cascade_energy=None, flavors=None, currents=None):
     """ Filters events by certain requiremenents.
     
     Parameters:
@@ -394,6 +454,10 @@ def event_filter(file, min_track_length=None, max_cascade_energy=None):
     max_cascade_energy : float or None
         All events with a track length that is not nan will be excluded
         if their cascade energy exceeds that threshold.
+    flavors : list or None
+        Only certain neutrino flavor events will be considered if given.
+    currents : list or None
+        Only certain current events will be considered if given. 
 
     Returns:
     --------
@@ -417,13 +481,22 @@ def event_filter(file, min_track_length=None, max_cascade_energy=None):
         filter[idx_removed] = False
         print(f'After Cascade Energy filter {filter.sum()} / {filter.shape[0]} events remain.')
     
+    # Flavor filter
+    if flavors is not None:
+        pdg_encoding = np.array(file['PDGEncoding'])
+        flavor_mask = np.zeros_like(filter, dtype=np.bool)
+        for flavor in flavors:
+            flavor_mask[np.abs(pdg_encoding) == flavor] = True
+        filter = np.logical_and(filter, flavor_mask)
+        print(f'After Flavor filter {filter.sum()} / {filter.shape[0]} events remain.')
+
+    # Current filter
+    if currents is not None:
+        interaction_type = np.array(file['InteractionType'])
+        current_mask = np.zeros_like(filter, dtype=np.bool)
+        for current in currents:
+            current_mask[np.abs(interaction_type) == current] = True
+        filter = np.logical_and(filter, current_mask)
+        print(f'After Current filter {filter.sum()} / {filter.shape[0]} events remain.')
+
     return filter
-
-
-
-
-
-
-
-
-

@@ -1,5 +1,7 @@
 training/*
 training
+plots/*
+plots
 log
 *.hd5
 settings/gcnn_grid
