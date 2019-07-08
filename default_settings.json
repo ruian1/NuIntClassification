@@ -18,6 +18,8 @@
         ],
         "shuffle" : false,
         "max_charge" : null,
+        "max_true_energy" : null,
+        "min_true_energy" : null,
         "distances_precomputed" : false,
         "balance_classes" : false,
         "min_track_length" : null,

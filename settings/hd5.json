@@ -19,9 +19,9 @@
         "shuffle" : false,
         "max_charge" : null,
         "balance_classes" : true,
-        "min_track_length" : 100,
-        "max_cascade_energy" : 5,
-        "distances_precomputed" : true,
+        "min_track_length" : null,
+        "max_cascade_energy" : null,
+        "distances_precomputed" : true
     },
     "model" : {
         "type" : "gcn",
