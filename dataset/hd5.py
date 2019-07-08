@@ -47,7 +47,6 @@ class ShuffledTorchHD5Dataset(torch.utils.data.Dataset):
         self.file = h5py.File(filepath)
         self.feature_names = features
         self.coordinate_names = coordinates
-        self.graph_feature_names = None
 
         # Create class targets
         interaction_type = np.array(self.file['InteractionType'], dtype=np.int8)
@@ -64,6 +63,7 @@ class ShuffledTorchHD5Dataset(torch.utils.data.Dataset):
             # Initialize numpys random seed with a hash of the filepath such that always the same indices get chosen 'randomly'
             np.random.seed(int(hashlib.sha1(filepath.encode()).hexdigest(), 16) & 0xFFFFFFFF)
             classes, class_counts = np.unique(targets[filter], return_counts=True)
+            print(f'Classes {classes}; Class counts {class_counts}')
             min_class_size = np.min(class_counts)
             for class_ in classes:
                 # Remove the last samples of the larger class
@@ -125,11 +125,11 @@ class ShuffledTorchHD5Dataset(torch.utils.data.Dataset):
         if isinstance(class_weights, dict):
             class_weights = {int(class_) : weight for class_, weight in class_weights.items()}
         self.weights = compute_sample_weight(class_weights, self.targets)
-        print(self.weights.shape)
 
         # Sanity checks
         endpoints = self.number_vertices + self.event_offsets
         assert(np.max(endpoints)) <= self.features.shape[0]
+        # print(np.unique(np.vstack((np.abs(pdg_encoding[self._idxs]), interaction_type[self._idxs])), return_counts=True, axis=1))
 
         if close_file:
             self.file.close()
@@ -441,7 +441,8 @@ class ShuffledTorchHD5DatasetWithGraphFeaturesAndAuxiliaryTargets(ShuffledTorchH
         weights = torch.FloatTensor(w).to(device).unsqueeze(1)
         return (features, coordinates, masks, graph_features), (targets, regression_targets), weights
 
-def event_filter(file, min_track_length=None, max_cascade_energy=None, flavors=None, currents=None):
+def event_filter(file, min_track_length=None, max_cascade_energy=None, min_total_energy=None, max_total_energy=None, 
+    flavors=None, currents=None):
     """ Filters events by certain requiremenents.
     
     Parameters:
@@ -454,6 +455,10 @@ def event_filter(file, min_track_length=None, max_cascade_energy=None, flavors=N
     max_cascade_energy : float or None
         All events with a track length that is not nan will be excluded
         if their cascade energy exceeds that threshold.
+    min_total_energy : float or None
+        All events with a total energy (cascade + muon) less than that will be excluded.
+    max_total_energy : float or None
+        All events with a total energy (cascade + muon) more than that will be excluded.
     flavors : list or None
         Only certain neutrino flavor events will be considered if given.
     currents : list or None
@@ -466,6 +471,12 @@ def event_filter(file, min_track_length=None, max_cascade_energy=None, flavors=N
     """
     track_length = np.array(file['TrackLength'])
     cascade_energy = np.array(file['CascadeEnergy'])
+    muon_energy = np.array(file['MuonEnergy'])
+    muon_energy[np.isnan(muon_energy)] = 0
+    total_energy = cascade_energy.copy()
+    total_energy[np.isnan(total_energy)] = 0
+    total_energy += muon_energy
+
     filter = np.ones(track_length.shape[0], dtype=np.bool)
     has_track_length = ~np.isnan(track_length)
 
@@ -498,5 +509,17 @@ def event_filter(file, min_track_length=None, max_cascade_energy=None, flavors=N
             current_mask[np.abs(interaction_type) == current] = True
         filter = np.logical_and(filter, current_mask)
         print(f'After Current filter {filter.sum()} / {filter.shape[0]} events remain.')
+
+    # Min total nergy filter
+    if min_total_energy is not None:
+        idx_removed = np.where(total_energy < min_total_energy)[0]
+        filter[idx_removed] = False
+        print(f'After Min Total Energy filter {filter.sum()} / {filter.shape[0]} events remain.')
+
+    # Max total nergy filter
+    if max_total_energy is not None:
+        idx_removed = np.where(total_energy > max_total_energy)[0]
+        filter[idx_removed] = False
+        print(f'After Max Total Energy filter {filter.sum()} / {filter.shape[0]} events remain.')
 
     return filter

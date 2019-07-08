@@ -20,8 +20,8 @@
         ],
         "shuffle" : false,
         "balance_classes" : true,
-        "min_track_length" : 70,
-        "max_cascade_energy" : 10,
+        "min_track_length" : null,
+        "max_cascade_energy" : null,
         "flavors" : [
             12, 14
         ],
@@ -32,14 +32,14 @@
     "model" : {
         "type" : "gcn_graph_features",
         "hidden_units_graph_convolutions" : [64, 64, 64, 64, 64],
-        "hidden_units_fully_connected" : [64, 1],
+        "hidden_units_fully_connected" : [1],
         "hidden_units_graph_mlp" : [64, 64, 64],
         "use_batchnorm" : true,
         "use_residual" : true,
         "dropout_rate" : 0.5
     },
     "training" : {
-        "learning_rate" : 1e-3,
+        "learning_rate" : 1e-4,
         "learning_rate_scheduler_patience" : 2,
         "batch_size" : 64,
         "epochs" : 25,

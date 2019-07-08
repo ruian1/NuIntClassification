@@ -167,6 +167,8 @@ if __name__ == '__main__':
     validation_metrics = defaultdict(list)
     training_metrics = defaultdict(list)
 
+    log(logfile, f'Training on {len(data_train)} samples.')
+
     epochs = settings['training']['epochs']
     for epoch in range(epochs):
         print(f'\nEpoch {epoch + 1} / {epochs}, learning rate: {optimizer.param_groups[0]["lr"]}')

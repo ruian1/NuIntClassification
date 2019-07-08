@@ -38,6 +38,7 @@ def create_dataset(f, idxs, dir, prefix, column_types):
                 column = 'item'
             elif column_types[key] == 'debug':
                 shape = (N_events * 3,)
+                column = 'item'
             else:
                 raise RuntimeError('Unkown column type for key {key}: {column_types[key]}')
             columns[column_types[key]].append(key)

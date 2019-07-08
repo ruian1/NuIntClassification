@@ -15,6 +15,12 @@ from icecube import NuFlux # genie_icetray
 with open('/project/6008051/fuchsgru/NuIntClassification/dom_positions.pkl', 'rb') as f:
     dom_positions = pickle.load(f)
 
+# Speed of light in ice (m/ns)
+speed_of_light_in_ice = 0.299792 / 1.33
+
+# Scale all coordinates by this amount
+coordinate_scale = 50.0
+
 flux_service  = NuFlux.makeFlux("IPhonda2014_spl_solmin")
 
 def normalize_coordinates(coordinates, weights=None, scale=True, copy=False):
@@ -26,7 +32,7 @@ def normalize_coordinates(coordinates, weights=None, scale=True, copy=False):
         The coordinates matrix to be centered.
     weights : ndarray, shape [N] or None
         The weights for each coordinates.
-    scale : bool
+    scale : bool or float
         If true, the coordinates will all be scaled to have empircal variance of 1.
     copy : bool
         If true, the coordinate matrix will be copied and not overwritten.
@@ -47,6 +53,8 @@ def normalize_coordinates(coordinates, weights=None, scale=True, copy=False):
     if scale:
         std = np.sqrt(np.average(coordinates ** 2, axis=0, weights=None)) + 1e-20
         coordinates /= std
+    else:
+        std = None
     return coordinates, mean.flatten(), std
 
 vertex_features = [
@@ -83,7 +91,6 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
     x = frame['SRTTWOfflinePulsesDC']
     hits = x.apply(frame)
     track_reco = frame['IC86_Dunkman_L6_PegLeg_MultiNest8D_Track']
-    track_reco.shape = dataclasses.I3Particle.InfiniteTrack
 
     features = {feature : [] for feature in vertex_features}
     vertices = {axis : [] for axis in ('x', 'y', 'z')}
@@ -105,9 +112,17 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
         charges, times, times_shifted = [], [], []
         # Calculate the expected time of the charge at the DOM assuming a correct track reconstruction
         cherenkov_time = phys_services.I3Calculator.cherenkov_time(
-            frame['IC86_Dunkman_L6_PegLeg_MultiNest8D_Track'],
+            track_reco,
             dataclasses.I3Position(dom_position['x'], dom_position['y'], dom_position['z']))
-        expected_time = cherenkov_time + track_reco.time
+        # Light might also reach the DOM from the cascade at the interaction vertex, calculate the expected
+        # time for that as well
+        distance = np.sqrt(
+            (dom_position['x'] - track_reco.pos.x)**2 + (dom_position['y'] - track_reco.pos.y)**2 + (dom_position['z'] - track_reco.pos.z)**2)
+        cascade_time = distance / speed_of_light_in_ice
+        if np.isnan(cherenkov_time):
+            expected_time = cascade_time + track_reco.time
+        else:
+            expected_time = min(cherenkov_time, cascade_time) + track_reco.time
         for pulse in pulses:
             if pulse.charge >= charge_threshold:
                 charges.append(pulse.charge)
@@ -224,8 +239,11 @@ def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_t
     ### Create coordinates for each vertex
     coordinate_matrix = np.vstack(coordinates.values()).T
     #print(coordinate_matrix.shape, len(frame[feature_name]))
-    C_mean_centered, C_mean, C_std = normalize_coordinates(coordinate_matrix, weights=None, copy=True)
-    C_cog_centered, C_cog, C_cog_std = normalize_coordinates(coordinate_matrix, weights=features['TotalCharge'], copy=True)
+    C_mean_centered, C_mean, _ = normalize_coordinates(coordinate_matrix, weights=None, copy=True, scale=False)
+    C_mean_centered /= coordinate_scale
+    C_cog_centered, C_cog, _ = normalize_coordinates(coordinate_matrix, weights=features['TotalCharge'], copy=True, scale=False)
+    C_cog_centered /= coordinate_scale
+
     frame['VertexX'] = dataclasses.I3VectorFloat(C_mean_centered[:, 0])
     frame['VertexY'] = dataclasses.I3VectorFloat(C_mean_centered[:, 1])
     frame['VertexZ'] = dataclasses.I3VectorFloat(C_mean_centered[:, 2])
@@ -238,17 +256,9 @@ def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_t
     frame['PrimaryYOriginal'] = dataclasses.I3Double(nu.pos.y)
     frame['PrimaryZOriginal'] = dataclasses.I3Double(nu.pos.z)
     frame['COG'] = dataclasses.I3VectorFloat(C_cog)
-    frame['COGStd'] = dataclasses.I3VectorFloat(C_cog_std)
+    frame['COGStd'] = dataclasses.I3VectorFloat([coordinate_scale, coordinate_scale, coordinate_scale])
     frame['CMean'] = dataclasses.I3VectorFloat(C_mean)
-    frame['CStd'] = dataclasses.I3VectorFloat(C_std)
-
-    ### Precompute pairwise distances for each vertex and both set of 
-    distances = pairwise_distances(C_mean_centered).reshape(-1)
-    distances_cog = pairwise_distances(C_cog_centered).reshape(-1)
-    frame['Distances'] = dataclasses.I3VectorFloat(distances)
-    frame['COGDistances'] = dataclasses.I3VectorFloat(distances_cog)
-    #frame['DistancesOffset'] = icetray.I3Int(distances_offset)
-    distances_offset += distances.shape[0] ** 2
+    frame['CStd'] = dataclasses.I3VectorFloat([coordinate_scale, coordinate_scale, coordinate_scale])
 
     ### Compute targets for possible auxilliary tasks, i.e. position and direction of the interaction
     frame['PrimaryX'] = dataclasses.I3Double((nu.pos.x - C_mean[0]) / C_std[0])
@@ -302,8 +312,7 @@ def create_dataset(outfile, infiles):
         'NumberVertices',
         # Coordinates and pairwise distances
         'VertexX', 'VertexY', 'VertexZ', 'COGShiftedVertexX', 
-        'COGShiftedVertexY', 'COGShiftedVertexZ', 'Distances',
-        'COGDistances',
+        'COGShiftedVertexY', 'COGShiftedVertexZ',
         # Auxilliary targets
         'PrimaryX', 'PrimaryY', 'PrimaryZ', 'COGPrimaryX', 'COGPrimaryY', 
         'COGPrimaryZ', 'PrimaryAzimuth', 'PrimaryZenith',
