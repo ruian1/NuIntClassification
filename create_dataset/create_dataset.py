@@ -11,6 +11,8 @@ import pickle
 from sklearn.metrics import pairwise_distances
 from icecube import NuFlux # genie_icetray
 
+flux_service  = NuFlux.makeFlux("IPhonda2014_spl_solmin")
+
 # Parses i3 files in order to create a (huge) hdf5 file that contains all events of all files
 with open('/project/6008051/fuchsgru/NuIntClassification/dom_positions.pkl', 'rb') as f:
     dom_positions = pickle.load(f)
@@ -18,12 +20,16 @@ with open('/project/6008051/fuchsgru/NuIntClassification/dom_positions.pkl', 'rb
 # Speed of light in ice (m/ns)
 speed_of_light_in_ice = 0.299792 / 1.33
 
-# Scale all coordinates by this amount
-coordinate_scale = 50.0
+# Scale all coordinates by this amount, those values are empirical
+coordinate_scale = [37.691566, 36.396854, 41.384834]
 
-flux_service  = NuFlux.makeFlux("IPhonda2014_spl_solmin")
+# Feature columns per vertex of a graph in the output hdf5 file
+vertex_features = [
+    'ChargeFirstPulse', 'ChargeLastPulse', 'ChargeMaxPulse', 'TimeFirstPulse', 'TimeLastPulse', 'TimeMaxPulse',
+    'TotalCharge', 'TimeStd',  'TimeDeltaFirstPulse', 'TimeDeltaLastPulse', 'TimeDeltaMaxPulse', 'TimeDeltaStd',
+]
 
-def normalize_coordinates(coordinates, weights=None, scale=True, copy=False):
+def normalize_coordinates(coordinates, weights=None, scale=coordinate_scale, copy=False):
     """ Normalizes the coordinates matrix by centering it using weighs (like charge).
     
     Parameters:
@@ -32,8 +38,8 @@ def normalize_coordinates(coordinates, weights=None, scale=True, copy=False):
         The coordinates matrix to be centered.
     weights : ndarray, shape [N] or None
         The weights for each coordinates.
-    scale : bool or float
-        If true, the coordinates will all be scaled to have empircal variance of 1.
+    scale : ndarray, shape [3] or None
+        Scale to apply to each coordinate. If None is given, the standard deviation along each axis is used.
     copy : bool
         If true, the coordinate matrix will be copied and not overwritten.
         
@@ -43,28 +49,51 @@ def normalize_coordinates(coordinates, weights=None, scale=True, copy=False):
         The normalized coordinate matrix.
     mean : ndarray, shape [3]
         The means along all axis
-    std : ndarray, shape [3]
-        The standard deviations along all axis
+    scale : ndarray, shape [3]
+        The scaling along each axis.
     """
     if copy:
         coordinates = coordinates.copy()
     mean = np.average(coordinates, axis=0, weights=weights).reshape((1, -1))
     coordinates -= mean
-    if scale:
-        std = np.sqrt(np.average(coordinates ** 2, axis=0, weights=None)) + 1e-20
-        coordinates /= std
-    else:
-        std = None
-    return coordinates, mean.flatten(), std
+    if scale is None:
+        scale = np.sqrt(np.average(coordinates ** 2, axis=0, weights=None)) + 1e-20
+    coordinates /= scale
+    return coordinates, mean.flatten(), scale
 
-vertex_features = [
-    'ChargeFirstPulse', 'ChargeLastPulse', 'ChargeMaxPulse', 'TimeFirstPulse', 'TimeLastPulse', 'TimeMaxPulse',
-    'TotalCharge', 'TimeStd',  'TimeFirstPulseShifted', 'TimeLastPulseShifted', 'TimeMaxPulseShifted',
-    'TotalChargeShifted', 'TimeStdShifted', 
+def dom_get_expected_time(omkey, reco):
+    """ Calculates the expected time for a DOM hit assuming a correct track reconstruction.
+    
+    Parameters:
+    -----------
+    omkey : Omkey
+        The key to identify the optical module.
+    reco : icecube.dataclasses.I3Particle
+        The track reconstruction (contained track with length).
 
-]
+    Returns:
+    --------
+    expected_time : float
+        The expected nominal time (i.e. not relative to the interaction time), it would take light to reach the DOM
+    """
+    dom_position = dataclasses.I3Position(dom_positions[omkey]['x'], dom_positions[omkey]['y'], dom_positions[omkey]['z'])
+    # Calculate how long photons from the interaction itself would take to arrive at the DOM
+    expected_time = (dom_position - reco.pos).magnitude / speed_of_light_in_ice
+    # Calculate how long Cherenkov photons would take to arrive at the DOM
+    # Assume the track was infinite to also get time at least for DOMs that recorded scattered light
+    reco.shape = dataclasses.I3Particle.InfiniteTrack
+    cherenkov_time = phys_services.I3Calculator.cherenkov_time(reco, dom_position)
+    # If the origin of those Cherenkov photons on the track was *before* the interaction vertex, light must have come from the interaction itself
+    cherenkov_position = phys_services.I3Calculator.cherenkov_position(reco, dom_position)
+    a = (cherenkov_position - reco.pos).x / reco.dir.x
+    assert np.isclose(a, (cherenkov_position - reco.pos).y / reco.dir.y)
+    assert np.isclose(a, (cherenkov_position - reco.pos).z / reco.dir.z)
+    if a >= 0:
+        # The origin of the Cherenkov light on the track is after the interaction vertex
+        expected_time = min(expected_time, cherenkov_time)
+    return expected_time + reco.time
 
-def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_scale=1.0):
+def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1.0, charge_scale=1.0):
     """ Extracts data (charge and time of first arrival) as well as their positions from a frame.
     
     Parameters:
@@ -94,60 +123,38 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
 
     features = {feature : [] for feature in vertex_features}
     vertices = {axis : [] for axis in ('x', 'y', 'z')}
-    
-    # First compute the charge weighted average time of the entire event
-    charges, times = [], []
-    for omkey, pulses in hits:
-        for pulse in pulses:
-            if pulse.charge >= charge_threshold:
-                charges.append(pulse.charge)
-                times.append(pulse.time)
-    times = np.array(times) * time_scale
-    average_time = np.average(times, weights=charges)
 
     # For each event compute event features based on the pulses
     omkeys = []
     for omkey, pulses in hits:
-        dom_position = dom_positions[omkey]
-        charges, times, times_shifted = [], [], []
-        # Calculate the expected time of the charge at the DOM assuming a correct track reconstruction
-        cherenkov_time = phys_services.I3Calculator.cherenkov_time(
-            track_reco,
-            dataclasses.I3Position(dom_position['x'], dom_position['y'], dom_position['z']))
-        # Light might also reach the DOM from the cascade at the interaction vertex, calculate the expected
-        # time for that as well
-        distance = np.sqrt(
-            (dom_position['x'] - track_reco.pos.x)**2 + (dom_position['y'] - track_reco.pos.y)**2 + (dom_position['z'] - track_reco.pos.z)**2)
-        cascade_time = distance / speed_of_light_in_ice
-        if np.isnan(cherenkov_time):
-            expected_time = cascade_time + track_reco.time
-        else:
-            expected_time = min(cherenkov_time, cascade_time) + track_reco.time
+        expected_time = dom_get_expected_time(omkey, track_reco)
         for pulse in pulses:
             if pulse.charge >= charge_threshold:
                 charges.append(pulse.charge)
-                times.append(pulse.time)
-                times_shifted.append(pulse.time - expected_time)
-        times = np.array(times) * time_scale
-        times_shifted = np.array(times_shifted) * time_scale
+                times.append(pulse.time + frame['TimeShift'])
+
         charges = np.array(charges) * charge_scale
         if charges.shape[0] == 0: continue # Don't use DOMs that recorded no charge above the threshold
-        times -= average_time
-        time_std = np.sqrt(np.average((times)**2, weights=charges))
-        time_std_shifted = np.sqrt(np.average((times_shifted)**2, weights=charges))
+        times = np.array(times) * time_scale
+        time_delta = times - expected_time
+        # Calculate the charge weighted standard devation of times
+        charge_weighted_mean_time = np.average(times, weights=charges)
+        charge_weighted_std_time = np.sqrt(np.average((times - charge_weighted_mean_time)**2, weights=charges))
+        charge_weighted_mean_time_delta = np.average(time_delta, weights=charges)
+        charge_weighted_std_time_delta = np.sqrt(np.average((time_delta - charge_weighted_mean_time_delta)**2, weights=charges))
+
         features['ChargeFirstPulse'].append(charges[0])
         features['ChargeLastPulse'].append(charges[-1])
         features['ChargeMaxPulse'].append(charges.max())
         features['TimeFirstPulse'].append(times[0])
         features['TimeLastPulse'].append(times[-1])
         features['TimeMaxPulse'].append(times[charges.argmax()])
-        features['TimeStd'].append(time_std)
-        features['TimeFirstPulseShifted'].append(times_shifted[0])
-        features['TimeLastPulseShifted'].append(times_shifted[-1])
-        features['TimeMaxPulseShifted'].append(times_shifted[charges.argmax()])
-        features['TimeStdShifted'].append(time_std_shifted)
+        features['TimeStd'].append(charge_weighted_std_time)
+        features['TimeDeltaFirstPulse'].append(time_delta[0])
+        features['TimeDeltaLastPulse'].append(time_delta[-1])
+        features['TimeDeltaMaxPulse'].append(time_delta[charges.argmax()])
+        features['TimeDeltaStd'].append(charge_weighted_std_time_delta)
         features['TotalCharge'].append(charges.sum())
-
         for axis in vertices:
             vertices[axis].append(dom_position[axis])
         assert omkey not in omkeys
@@ -225,6 +232,7 @@ def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_t
     frame['DeltaLLH'] = dataclasses.I3Double(frame['IC86_Dunkman_L6']['delta_LLH']) # Used for a baseline classifcation
     frame['RunID'] = icetray.I3Int(frame['I3EventHeader'].run_id)
     frame['EventID'] = icetray.I3Int(frame['I3EventHeader'].event_id)
+    frame['PrimaryEnergy'] = dataclasses.I3Double(nu.energy)
 
     ### Create features for each event 
     features, coordinates, _ = get_events_from_frame(frame, charge_scale=charge_scale, time_scale=time_scale)
@@ -237,37 +245,32 @@ def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_t
     event_offset += len(features[features.keys()[0]])
 
     ### Create coordinates for each vertex
-    coordinate_matrix = np.vstack(coordinates.values()).T
-    #print(coordinate_matrix.shape, len(frame[feature_name]))
-    C_mean_centered, C_mean, _ = normalize_coordinates(coordinate_matrix, weights=None, copy=True, scale=False)
-    C_mean_centered /= coordinate_scale
-    C_cog_centered, C_cog, _ = normalize_coordinates(coordinate_matrix, weights=features['TotalCharge'], copy=True, scale=False)
-    C_cog_centered /= coordinate_scale
+    C = np.vstack(coordinates.values()).T
+    C, C_mean, C_std = normalize_coordinates(C, weights=None, copy=True)
+    C_cog, C_mean_cog, C_std_cog = normalize_coordinates(C, weights=features['TotalCharge'], copy=True)
 
-    frame['VertexX'] = dataclasses.I3VectorFloat(C_mean_centered[:, 0])
-    frame['VertexY'] = dataclasses.I3VectorFloat(C_mean_centered[:, 1])
-    frame['VertexZ'] = dataclasses.I3VectorFloat(C_mean_centered[:, 2])
-    frame['COGShiftedVertexX'] = dataclasses.I3VectorFloat(C_cog_centered[:, 0])
-    frame['COGShiftedVertexY'] = dataclasses.I3VectorFloat(C_cog_centered[:, 1])
-    frame['COGShiftedVertexZ'] = dataclasses.I3VectorFloat(C_cog_centered[:, 2])
+    frame['VertexX'] = dataclasses.I3VectorFloat(C[:, 0])
+    frame['VertexY'] = dataclasses.I3VectorFloat(C[:, 1])
+    frame['VertexZ'] = dataclasses.I3VectorFloat(C[:, 2])
+    frame['COGCenteredVertexX'] = dataclasses.I3VectorFloat(C_cog_centered[:, 0])
+    frame['COGCenteredVertexY'] = dataclasses.I3VectorFloat(C_cog_centered[:, 1])
+    frame['COGCenteredVertexZ'] = dataclasses.I3VectorFloat(C_cog_centered[:, 2])
 
     ### Output centering and true debug information
     frame['PrimaryXOriginal'] = dataclasses.I3Double(nu.pos.x)
     frame['PrimaryYOriginal'] = dataclasses.I3Double(nu.pos.y)
     frame['PrimaryZOriginal'] = dataclasses.I3Double(nu.pos.z)
-    frame['COG'] = dataclasses.I3VectorFloat(C_cog)
-    frame['COGStd'] = dataclasses.I3VectorFloat([coordinate_scale, coordinate_scale, coordinate_scale])
-    frame['CMean'] = dataclasses.I3VectorFloat(C_mean)
-    frame['CStd'] = dataclasses.I3VectorFloat([coordinate_scale, coordinate_scale, coordinate_scale])
+    frame['CMeans'] = dataclasses.I3VectorFloat(C_mean)
+    frame['COGCenteredCMeans'] = dataclasses.I3VectorFloat(C_mean_cog)
 
     ### Compute targets for possible auxilliary tasks, i.e. position and direction of the interaction
     frame['PrimaryX'] = dataclasses.I3Double((nu.pos.x - C_mean[0]) / C_std[0])
     frame['PrimaryY'] = dataclasses.I3Double((nu.pos.y - C_mean[1]) / C_std[1])
     frame['PrimaryZ'] = dataclasses.I3Double((nu.pos.z - C_mean[2]) / C_std[2])
 
-    frame['COGPrimaryX'] = dataclasses.I3Double((nu.pos.x - C_cog[0]) / C_cog_std[0])
-    frame['COGPrimaryY'] = dataclasses.I3Double((nu.pos.y - C_cog[1]) / C_cog_std[1])
-    frame['COGPrimaryZ'] = dataclasses.I3Double((nu.pos.z - C_cog[2]) / C_cog_std[2])
+    frame['COGCenteredPrimaryX'] = dataclasses.I3Double((nu.pos.x - C_mean_cog[0]) / C_std_cog[0])
+    frame['COGCenteredPrimaryY'] = dataclasses.I3Double((nu.pos.y - C_mean_cog[1]) / C_std_cog[1])
+    frame['COGCenteredPrimaryZ'] = dataclasses.I3Double((nu.pos.z - C_mean_cog[2]) / C_std_cog[2])
     frame['PrimaryAzimuth'] = dataclasses.I3Double(nu.dir.azimuth)
     frame['PrimaryZenith'] = dataclasses.I3Double(nu.dir.zenith)
 
@@ -276,9 +279,9 @@ def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_t
     frame['RecoX'] = dataclasses.I3Double((track_reco.pos.x - C_mean[0]) / C_std[0])
     frame['RecoY'] = dataclasses.I3Double((track_reco.pos.y - C_mean[1]) / C_std[1])
     frame['RecoZ'] = dataclasses.I3Double((track_reco.pos.z - C_mean[2]) / C_std[2])
-    frame['COGRecoX'] = dataclasses.I3Double((track_reco.pos.x - C_cog[0]) / C_cog_std[0])
-    frame['COGRecoY'] = dataclasses.I3Double((track_reco.pos.x - C_cog[1]) / C_cog_std[1])
-    frame['COGRecoZ'] = dataclasses.I3Double((track_reco.pos.x - C_cog[2]) / C_cog_std[2])
+    frame['COGCenteredRecoX'] = dataclasses.I3Double((track_reco.pos.x - C_mean_cog[0]) / C_std_cog[0])
+    frame['COGCenteredRecoY'] = dataclasses.I3Double((track_reco.pos.y - C_mean_cog[1]) / C_std_cog[1])
+    frame['COGCenteredRecoZ'] = dataclasses.I3Double((track_reco.pos.z - C_mean_cog[2]) / C_std_cog[2])
     frame['RecoAzimuth'] = dataclasses.I3Double(track_reco.dir.azimuth)
     frame['RecoZenith'] = dataclasses.I3Double(track_reco.dir.zenith)
     return True
@@ -311,19 +314,21 @@ def create_dataset(outfile, infiles):
         # Lookups
         'NumberVertices',
         # Coordinates and pairwise distances
-        'VertexX', 'VertexY', 'VertexZ', 'COGShiftedVertexX', 
-        'COGShiftedVertexY', 'COGShiftedVertexZ',
+        'VertexX', 'VertexY', 'VertexZ', 
+        'COGCenteredVertexX', 'COGCenteredVertexY', 'COGCenteredVertexZ',
         # Auxilliary targets
-        'PrimaryX', 'PrimaryY', 'PrimaryZ', 'COGPrimaryX', 'COGPrimaryY', 
-        'COGPrimaryZ', 'PrimaryAzimuth', 'PrimaryZenith',
+        'PrimaryX', 'PrimaryY', 'PrimaryZ', 
+        'COGCenteredPrimaryX', 'COGCenteredPrimaryY', 'COGCenteredPrimaryZ', 
+        'PrimaryAzimuth', 'PrimaryZenith', 'PrimaryEnergy'
         # Reconstruction
-        'RecoX', 'RecoY', 'RecoZ', 'COGRecoX', 'COGRecoY', 'COGRecoZ',
+        'RecoX', 'RecoY', 'RecoZ', 
+        'COGCenteredRecoX', 'COGCenteredRecoY', 'COGCenteredRecoZ',
         'RecoAzimuth', 'RecoZenith',
         # Flux weights
         'NuMuFlux', 'NueFlux', 'NoFlux',
         # Debug stuff
         'PrimaryXOriginal', 'PrimaryYOriginal', 'PrimaryZOriginal',
-        'COG', 'COGStd', 'CMean', 'CStd',
+        'CMeans', 'COGCenteredCMeans',
         ], 
                 TableService=I3HDFTableService(outfile),
                 SubEventStreams=['InIceSplit'],
