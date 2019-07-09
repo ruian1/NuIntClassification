@@ -249,6 +249,7 @@ def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_t
     C, C_mean, C_std = normalize_coordinates(C, weights=None, copy=True)
     C_cog, C_mean_cog, C_std_cog = normalize_coordinates(C, weights=features['TotalCharge'], copy=True)
 
+
     frame['VertexX'] = dataclasses.I3VectorFloat(C[:, 0])
     frame['VertexY'] = dataclasses.I3VectorFloat(C[:, 1])
     frame['VertexZ'] = dataclasses.I3VectorFloat(C[:, 2])
@@ -343,5 +344,5 @@ if __name__ == '__main__':
     for interaction_type in ('nue', 'numu', 'nutau'):
         paths += glob('/project/6008051/hignight/dragon_3y/{0}/*'.format(interaction_type))
     assert(len(paths) == 1104)
-    outfile = '/project/6008051/fuchsgru/data/data_dragon6_parts/{0}.hd5'.format(file_idx)
+    outfile = '/project/6008051/fuchsgru/data/data_dragon8_parts/{0}.hd5'.format(file_idx)
     create_dataset(outfile, [paths[file_idx]])
