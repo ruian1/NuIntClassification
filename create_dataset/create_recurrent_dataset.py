@@ -4,17 +4,31 @@ from icecube.hdfwriter import I3HDFWriter
 from icecube.tableio import I3TableWriter
 from icecube.hdfwriter import I3HDFTableService
 from glob import glob
+import sys
 import tables
 import numpy as np
-import sys
 import pickle
 from sklearn.metrics import pairwise_distances
+from icecube import NuFlux # genie_icetray
+
+flux_service  = NuFlux.makeFlux("IPhonda2014_spl_solmin")
 
 # Parses i3 files in order to create a (huge) hdf5 file that contains all events of all files
 with open('/project/6008051/fuchsgru/NuIntClassification/dom_positions.pkl', 'rb') as f:
     dom_positions = pickle.load(f)
 
-def normalize_coordinates(coordinates, weights=None, scale=True, copy=False):
+# Speed of light in ice (m/ns)
+speed_of_light_in_ice = 0.299792 / 1.33
+
+# Scale all coordinates by this amount, those values are empirical
+coordinate_scale = [37.691566, 36.396854, 41.384834]
+
+# Feature columns for each hit in the output hdf5 file
+vertex_features = [
+    'Charge', 'Time', 'TimeDelta', 'TimeSinceLastPulse'
+]
+
+def normalize_coordinates(coordinates, weights=None, scale=coordinate_scale, copy=False):
     """ Normalizes the coordinates matrix by centering it using weighs (like charge).
     
     Parameters:
@@ -23,8 +37,8 @@ def normalize_coordinates(coordinates, weights=None, scale=True, copy=False):
         The coordinates matrix to be centered.
     weights : ndarray, shape [N] or None
         The weights for each coordinates.
-    scale : bool
-        If true, the coordinates will all be scaled to have empircal variance of 1.
+    scale : ndarray, shape [3] or None
+        Scale to apply to each coordinate. If None is given, the standard deviation along each axis is used.
     copy : bool
         If true, the coordinate matrix will be copied and not overwritten.
         
@@ -34,19 +48,51 @@ def normalize_coordinates(coordinates, weights=None, scale=True, copy=False):
         The normalized coordinate matrix.
     mean : ndarray, shape [3]
         The means along all axis
-    std : ndarray, shape [3]
-        The standard deviations along all axis
+    scale : ndarray, shape [3]
+        The scaling along each axis.
     """
     if copy:
         coordinates = coordinates.copy()
     mean = np.average(coordinates, axis=0, weights=weights).reshape((1, -1))
     coordinates -= mean
-    if scale:
-        std = np.sqrt(np.average(coordinates ** 2, axis=0, weights=weights)) + 1e-20
-        coordinates /= std
-    return coordinates, mean, std
+    if scale is None:
+        scale = np.sqrt(np.average(coordinates ** 2, axis=0, weights=None)) + 1e-20
+    coordinates /= scale
+    return coordinates, mean.flatten(), scale
+
+def dom_get_expected_time(omkey, reco):
+    """ Calculates the expected time for a DOM hit assuming a correct track reconstruction.
     
-def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_scale=1.0, max_num_steps=64):
+    Parameters:
+    -----------
+    omkey : Omkey
+        The key to identify the optical module.
+    reco : icecube.dataclasses.I3Particle
+        The track reconstruction (contained track with length).
+
+    Returns:
+    --------
+    expected_time : float
+        The expected nominal time (i.e. not relative to the interaction time), it would take light to reach the DOM
+    """
+    dom_position = dataclasses.I3Position(dom_positions[omkey]['x'], dom_positions[omkey]['y'], dom_positions[omkey]['z'])
+    # Calculate how long photons from the interaction itself would take to arrive at the DOM
+    expected_time = (dom_position - reco.pos).magnitude / speed_of_light_in_ice
+    # Calculate how long Cherenkov photons would take to arrive at the DOM
+    # Assume the track was infinite to also get time at least for DOMs that recorded scattered light
+    reco.shape = dataclasses.I3Particle.InfiniteTrack
+    cherenkov_time = phys_services.I3Calculator.cherenkov_time(reco, dom_position)
+    # If the origin of those Cherenkov photons on the track was *before* the interaction vertex, light must have come from the interaction itself
+    cherenkov_position = phys_services.I3Calculator.cherenkov_position(reco, dom_position)
+    a = (cherenkov_position - reco.pos).x / reco.dir.x
+    assert np.isclose(a, (cherenkov_position - reco.pos).y / reco.dir.y)
+    assert np.isclose(a, (cherenkov_position - reco.pos).z / reco.dir.z)
+    if a >= 0:
+        # The origin of the Cherenkov light on the track is after the interaction vertex
+        expected_time = min(expected_time, cherenkov_time)
+    return expected_time + reco.time
+
+def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1.0, time_delta_scale=1e-3, charge_scale=1.0):
     """ Extracts data (charge and time of first arrival) as well as their positions from a frame.
     
     Parameters:
@@ -55,99 +101,81 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1e-3, charge_s
         The physics frame to extract data from.
     charge_threshold : float
         The threshold for a charge to be considered a valid pulse for the time of the first pulse arrival (before scaling).
-    charge_scale : float
-        The normalization constant for charge.
     time_scale : float
         The normalization constant for time.
-    max_num_steps : int
-        The maximum sequence length (events with more pulses will be aggregated), events with less pulses zero padded
+    time_delta_scale:
+        Scale for the time differences between DOM hit time and expected hit time.
+    charge_scale : float
+        The normalization constant for charge.
     
     Returns:
     --------
-    event_features : ndarray, shape [num_steps, N, 8]
-        Feature matrix for the doms that were active during this event.
-    active_vertex : ndarray, shape [num_steps]
-        Index of the vertex with greatest idx that is active during each time step.
-        The order of the vertices ensure that vertices with smaller idx are active as well.
-        Thus, this can be used to easily create the adjacency matrix mask for each graph.
-    dom_positions : ndarray, shape [N, 3]
-        Coordinate matrix for the doms that were active during this event.
-    omkeys : ndarray, shape [num_steps, N, 3]
-        Omkeys for the doms that were active during this event.
+    dom_features : dict
+        A dict from features to ndarrays of shape [N_hits,] representing the features for each DOM hit.
+    dom_positions : dict
+        A dict from spatial axis to ndarrays of shape [N_hits,], representing the spatial coordinates of each DOM.
     """
-    track_reco = frame['IC86_Dunkman_L6_PegLeg_MultiNest8D_Track']
     x = frame['SRTTWOfflinePulsesDC']
     hits = x.apply(frame)
-    
-    # Create an evolution of the graph
-    events, event_to_vertex, vertices_unordered, omkeys = [], [], [], []
-    for vertex_idx, (omkey, pulses) in enumerate(hits):
-        dom_position = dom_positions[omkey]
-        vertices_unordered.append([dom_position[axis] for axis in ('x', 'y', 'z')])
-        cumulative_charge = 0
+    track_reco = frame['IC86_Dunkman_L6_PegLeg_MultiNest8D_Track']
+
+    features = {feature : [] for feature in vertex_features}
+    vertices = {axis : [] for axis in ('x', 'y', 'z')}
+
+    # For each event compute event features based on the pulses
+    for omkey, pulses in hits:
+        expected_time = dom_get_expected_time(omkey, track_reco)
         for pulse in pulses:
-            cumulative_charge += pulse.charge
             if pulse.charge >= charge_threshold:
-                events.append(np.array([
-                    pulse.charge, cumulative_charge, pulse.time, 
-                    0, # placeholder for the time of the previous event which is calculated after sorting
-                    track_reco.pos.x, track_reco.pos.y, 
-                    track_reco.pos.z, track_reco.dir.azimuth, track_reco.dir.zenith,
-                    vertex_idx
-                ]))
-                time_previous_event = pulse.time
-                event_to_vertex.append(vertex_idx)
-        assert omkey not in omkeys
-        omkeys.append(omkey)
+                features['Charge'].append(pulse.charge * charge_scale)
+                features['Time'].append((pulse.time + frame['TimeShift'].value) * time_scale)
+                features['TimeDelta'].append((pulse.time - expected_time + frame['TimeShift'].value) * time_delta_scale)
+                features['TimeSinceLastPulse'].append(features['Time'][-1])
+                for axis in vertices:
+                    vertices[axis].append(dom_positions[omkey][axis])
 
-    # Sort events by their time
-    events.sort(key = lambda event: event[2])
-    events = np.array(events)
+    # Order the hits according to their time
+    hit_order = np.argsort(features['Time'])
+    for feature in features:
+        features[feature] = features[feature][hit_order]
+    # Calculate the time differences between pulses
+    features['TimeSinceLastPulse'][1:] -= features['Time'][:-1]
+    features['TimeSinceLastPulse'][0] = 0
+    for axis in vertices:
+        vertices[axis] = vertices[axis][hit_order]
 
-    # Sort vertices by their first arrival time
-    # This ensures that if a vertex becomes active then all vertices with a lower idx will be active as well
-    # which makes the mask for the adjacency matrix a block matrix like: 
-    # [1s, 0s]
-    # [0s, 0s]
-    vertices, vertex_idxs = [], {}
-    for event in events:
-        vertex_idx = int(event[-1])
-        # Any vertex that is newly active will be inserted into the vertex array
-        # and assigned a new idx (= position in the vertex array)
-        if vertex_idx not in vertex_idxs:
-            vertex_idxs[vertex_idx] = len(vertices)
-            vertices.append(vertices_unordered[vertex_idx])
-        # Reassign the vertex idx (= position in the vertex array)
-        event[-1] = vertex_idxs[vertex_idx]
-    assert len(vertices) <= len(vertices_unordered)
+    return features, vertices
 
-    events[1 :, 3] = events[1 :, 2] - events[ : -1, 2] # Time difference of events
-    events[:, 0:2] *= charge_scale
-    events[:, 2:4] *= time_scale
-    # Compute charge weighted mean time
-    mean_time = np.average(events[:, 2], weights = events[:, 0])
-    events[:, 2:4] -= mean_time
 
-    num_steps = min(max_num_steps, len(events))
-    event_features = np.zeros((num_steps, len(vertices), events.shape[1] - 1))
-    active_vertex = np.zeros(num_steps, dtype=np.int)
-    if len(events) <= max_num_steps:
-        for idx, event in enumerate(events):
-            # From the time step of the arrival of the event on it will be visible in following events
-            event_features[idx : , int(event[-1]), : ] = event[ : -1]
-            active_vertex[idx] = int(event[-1]) # The reordering ensured that all vertices of events before this one have a lower index 
+def get_weight_by_flux(frame):
+    """ Calculates the weight of an event using the fluxes.
+    
+    Parameters:
+    -----------
+    frame : ?
+        The frame to process.
+    """
+    true_neutrino = dataclasses.get_most_energetic_neutrino(frame["I3MCTree"])
+    true_nu_energy  = true_neutrino.energy
+    true_nu_coszen  = np.cos(true_neutrino.dir.zenith)
+    norm = (frame["I3MCWeightDict"]['OneWeight'] / frame["I3MCWeightDict"]['NEvents']) * 2.
+    if (true_neutrino.type > 0):
+        nue_flux  = flux_service.getFlux(dataclasses.I3Particle.NuE , true_nu_energy, true_nu_coszen) * norm*0.5/0.7
+        numu_flux = flux_service.getFlux(dataclasses.I3Particle.NuMu, true_nu_energy, true_nu_coszen) * norm*0.5/0.7
     else:
-        for idx in range(max_num_steps):
-            idx_from, idx_to = int(idx * len(events) / max_num_steps), int((idx + 1) * len(events) / max_num_steps)
-            # Aggregate events as one time step
-            for event_idx in range(idx_from, idx_to):
-                event_features[idx :, int(events[event_idx, -1]), :] = events[event_idx, : -1]
-                active_vertex[idx] = int(events[event_idx, -1]) # The reordering ensured that all vertices of events before this one have a lower index
-        
-    return event_features, active_vertex, np.array(vertices), np.array(omkeys)
+        nue_flux  = flux_service.getFlux(dataclasses.I3Particle.NuEBar , true_nu_energy, true_nu_coszen) * norm*0.5/0.3
+        numu_flux = flux_service.getFlux(dataclasses.I3Particle.NuMuBar, true_nu_energy, true_nu_coszen) * norm*0.5/0.3
+    frame['NuMuFlux'] = dataclasses.I3Double(numu_flux)
+    frame['NueFlux'] = dataclasses.I3Double(nue_flux)
+    frame['NoFlux'] = dataclasses.I3Double(norm)
+    return True
 
-def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-3, max_num_steps=64, append_coordinates_to_features=True):
-    """ Creates normalized features from a frame.
+
+event_offset = 0L
+distances_offset = 0L
+
+def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_to_features=False):
+    """ Processes a frame to create an event graph and metadata out of it.
     
     Parameters:
     -----------
@@ -159,78 +187,24 @@ def get_normalized_data_from_frame(frame, charge_scale=1.0, time_scale=1e-3, max
         The normalization constant for time.
     append_coordinates_to_features : bool
         If the normalized coordinates should be appended to the feature matrix.
-    max_num_steps : int
-        The maximum sequence length (events with more pulses will be aggregated), events with less pulses zero padded
-        
-    Returns:
-    --------
-    dom_features : ndarray, shape [num_steps, N, 9 or 12]
-        Feature matrix for the doms that were active during this event.
-    active_vertex : ndarray, shape [num_steps]
-        Index of the vertex with greatest idx that is active during each time step.
-        The order of the vertices ensure that vertices with smaller idx are active as well.
-        Thus, this can be used to easily create the adjacency matrix mask for each graph.
-    dom_positions : ndarray, shape [N, 3]
-        Coordinate matrix for the doms that were active during this event. All values are in range [0, 1]
-    omkeys : ndarray, shape [N, 3]
-        Omkeys for the doms that were active during this event.
     """
-    features, active_vertex, coordinates, omkeys = get_events_from_frame(frame, charge_scale=charge_scale, time_scale=time_scale, max_num_steps=max_num_steps)
-    coordinates, coordinate_mean, coordinate_std = normalize_coordinates(coordinates, None)
-    # Scale the origin of the track reconstruction to share the same coordinate system
-    features[:, :, 4:7] -= coordinate_mean
-    features[:, :, 4:7] /= coordinate_std
-    
-    if append_coordinates_to_features:
-        num_steps = features.shape[0]
-        #features = np.stack((features, np.repeat(features[np.newaxis, :, :], num_steps)))
-        features = np.concatenate((features, np.repeat(coordinates[np.newaxis, :, :], num_steps, axis=0)), axis=-1)
+    global event_offset
+    global distances_offset
 
-    return features, active_vertex, coordinates, omkeys
+    ### Meta data of the event for analysis of the classifier and creation of ground truth
+    nu = dataclasses.get_most_energetic_neutrino(frame['I3MCTree'])
 
-def process_frame(frame):
-    """ Callback for processing a frame and adding relevant data to the hdf5 file. 
-    
-    Parameters:
-    -----------
-    frame : ?
-        The frame to process.
-    """
     # Obtain the PDG Encoding for ground truth
-    frame['PDGEncoding'] = dataclasses.I3Double(
-        dataclasses.get_most_energetic_neutrino(frame['I3MCTree']).pdg_encoding)
+    frame['PDGEncoding'] = dataclasses.I3Double(nu.pdg_encoding)
     frame['InteractionType'] = dataclasses.I3Double(frame['I3MCWeightDict']['InteractionType'])
     frame['NumberChannels'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['NchCleaned'])
-    frame['TotalCharge'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['DCFiducialPE'])
-    features, active_vertex, coordinates, _ = get_normalized_data_from_frame(frame)
-    frame['ActiveVertex'] = dataclasses.I3VectorInt(active_vertex.astype(np.int))
-    # Compute pairwise distances
-    distances = pairwise_distances(coordinates).reshape(-1)
-    frame['Distances'] = dataclasses.I3VectorFloat(distances)
-    num_steps, num_vertices, _ = features.shape
-    frame['NumberVertices'] = icetray.I3Int(num_vertices)
-    frame['NumberSteps'] = icetray.I3Int(num_steps)
-    # Concatenate the feature columns for an event over all its time steps
-    features = features.reshape((num_steps * num_vertices, -1))
-    frame['Charge'] = dataclasses.I3VectorFloat(features[:, 0])
-    frame['CumulativeCharge'] = dataclasses.I3VectorFloat(features[:, 1])
-    frame['Time'] = dataclasses.I3VectorFloat(features[:, 2])
-    frame['RelativeTime'] = dataclasses.I3VectorFloat(features[:, 3])
-    frame['RecoX'] = dataclasses.I3VectorFloat(features[:, 4])
-    frame['RecoY'] = dataclasses.I3VectorFloat(features[:, 5])
-    frame['RecoZ'] = dataclasses.I3VectorFloat(features[:, 6])
-    frame['RecoAzimuth'] = dataclasses.I3VectorFloat(features[:, 7])
-    frame['RecoZenith'] = dataclasses.I3VectorFloat(features[:, 8])
-    # Redundant saving of vertex coordinates to match the shape and enhance computational effort when learning
-    frame['PulseX'] = dataclasses.I3VectorFloat(features[:, 9])
-    frame['PulseY'] = dataclasses.I3VectorFloat(features[:, 10])
-    frame['PulseZ'] = dataclasses.I3VectorFloat(features[:, 11])
-    frame['VertexX'] = dataclasses.I3VectorFloat(coordinates[:, 0])
-    frame['VertexY'] = dataclasses.I3VectorFloat(coordinates[:, 1])
-    frame['VertexZ'] = dataclasses.I3VectorFloat(coordinates[:, 2])
-    frame['DeltaLLH'] = dataclasses.I3Double(frame['IC86_Dunkman_L6']['delta_LLH']) # Used for a baseline classifcation
+    frame['DCFiducialPE'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['DCFiducialPE'])
     frame['NeutrinoEnergy'] = dataclasses.I3Double(frame['trueNeutrino'].energy)
-    frame['CascadeEnergy'] = dataclasses.I3Double(frame['trueCascade'].energy)
+    # Some rare events do not produce a cascade
+    try:
+        frame['CascadeEnergy'] = dataclasses.I3Double(frame['trueCascade'].energy)
+    except:
+        frame['CascadeEnergy'] = dataclasses.I3Double(np.nan)
     try:
         # Appearently also frames with no primary muon contain this field, so to distinguish try to access it (which should throw an exception)
         frame['MuonEnergy'] = dataclasses.I3Double(frame['trueMuon'].energy)
@@ -238,6 +212,62 @@ def process_frame(frame):
     except:
         frame['MuonEnergy'] = dataclasses.I3Double(np.nan)
         frame['TrackLength'] = dataclasses.I3Double(np.nan)
+    frame['DeltaLLH'] = dataclasses.I3Double(frame['IC86_Dunkman_L6']['delta_LLH']) # Used for a baseline classifcation
+    frame['RunID'] = icetray.I3Int(frame['I3EventHeader'].run_id)
+    frame['EventID'] = icetray.I3Int(frame['I3EventHeader'].event_id)
+    frame['PrimaryEnergy'] = dataclasses.I3Double(nu.energy)
+
+    ### Create features for each event 
+    features, coordinates = get_events_from_frame(frame, charge_scale=charge_scale, time_scale=time_scale)
+    for feature_name in vertex_features:
+        frame[feature_name] = dataclasses.I3VectorFloat(features[feature_name])
+    
+    ### Create offset lookups for the flattened feature arrays per event
+    frame['NumberHits'] = icetray.I3Int(len(features[features.keys()[0]]))
+    #frame['Offset'] = icetray.I3Int(event_offset)
+    event_offset += len(features[features.keys()[0]])
+
+    ### Create coordinates for each vertex
+    C = np.vstack(coordinates.values()).T
+    C, C_mean, C_std = normalize_coordinates(C, weights=None, copy=True)
+    C_cog, C_mean_cog, C_std_cog = normalize_coordinates(C, weights=features['TotalCharge'], copy=True)
+
+
+    frame['VertexX'] = dataclasses.I3VectorFloat(C[:, 0])
+    frame['VertexY'] = dataclasses.I3VectorFloat(C[:, 1])
+    frame['VertexZ'] = dataclasses.I3VectorFloat(C[:, 2])
+    frame['COGCenteredVertexX'] = dataclasses.I3VectorFloat(C_cog_centered[:, 0])
+    frame['COGCenteredVertexY'] = dataclasses.I3VectorFloat(C_cog_centered[:, 1])
+    frame['COGCenteredVertexZ'] = dataclasses.I3VectorFloat(C_cog_centered[:, 2])
+
+    ### Output centering and true debug information
+    frame['PrimaryXOriginal'] = dataclasses.I3Double(nu.pos.x)
+    frame['PrimaryYOriginal'] = dataclasses.I3Double(nu.pos.y)
+    frame['PrimaryZOriginal'] = dataclasses.I3Double(nu.pos.z)
+    frame['CMeans'] = dataclasses.I3VectorFloat(C_mean)
+    frame['COGCenteredCMeans'] = dataclasses.I3VectorFloat(C_mean_cog)
+
+    ### Compute targets for possible auxilliary tasks, i.e. position and direction of the interaction
+    frame['PrimaryX'] = dataclasses.I3Double((nu.pos.x - C_mean[0]) / C_std[0])
+    frame['PrimaryY'] = dataclasses.I3Double((nu.pos.y - C_mean[1]) / C_std[1])
+    frame['PrimaryZ'] = dataclasses.I3Double((nu.pos.z - C_mean[2]) / C_std[2])
+
+    frame['COGCenteredPrimaryX'] = dataclasses.I3Double((nu.pos.x - C_mean_cog[0]) / C_std_cog[0])
+    frame['COGCenteredPrimaryY'] = dataclasses.I3Double((nu.pos.y - C_mean_cog[1]) / C_std_cog[1])
+    frame['COGCenteredPrimaryZ'] = dataclasses.I3Double((nu.pos.z - C_mean_cog[2]) / C_std_cog[2])
+    frame['PrimaryAzimuth'] = dataclasses.I3Double(nu.dir.azimuth)
+    frame['PrimaryZenith'] = dataclasses.I3Double(nu.dir.zenith)
+
+    ### Compute possible reco inputs that apply to entire event sets
+    track_reco = frame['IC86_Dunkman_L6_PegLeg_MultiNest8D_Track']
+    frame['RecoX'] = dataclasses.I3Double((track_reco.pos.x - C_mean[0]) / C_std[0])
+    frame['RecoY'] = dataclasses.I3Double((track_reco.pos.y - C_mean[1]) / C_std[1])
+    frame['RecoZ'] = dataclasses.I3Double((track_reco.pos.z - C_mean[2]) / C_std[2])
+    frame['COGCenteredRecoX'] = dataclasses.I3Double((track_reco.pos.x - C_mean_cog[0]) / C_std_cog[0])
+    frame['COGCenteredRecoY'] = dataclasses.I3Double((track_reco.pos.y - C_mean_cog[1]) / C_std_cog[1])
+    frame['COGCenteredRecoZ'] = dataclasses.I3Double((track_reco.pos.z - C_mean_cog[2]) / C_std_cog[2])
+    frame['RecoAzimuth'] = dataclasses.I3Double(track_reco.dir.azimuth)
+    frame['RecoZenith'] = dataclasses.I3Double(track_reco.dir.zenith)
     return True
 
 def create_dataset(outfile, infiles):
@@ -251,20 +281,39 @@ def create_dataset(outfile, infiles):
     paths : dict
         A list of intput i3 files.
     """
+    global event_offset
+    global distances_offset
+    event_offset, distances_offset = 0L, 0L
     infiles = infiles
     tray = I3Tray()
     tray.AddModule('I3Reader',
                 FilenameList = infiles)
     tray.AddModule(process_frame, 'process_frame')
-    tray.AddModule(I3TableWriter, 'I3TableWriter', keys=[
-        'NumberVertices', 'NumberSteps', 'Distances', 'ActiveVertex', # Offset data to rebuild matrices from flattened vectors
-        'Charge', 'CumulativeCharge', 'Time', 'RelativeTime', # Base features
-        'RecoX', 'RecoY', 'RecoZ', 'RecoAzimuth', 'RecoZenith', # Reco features
-        'PulseX', 'PulseY', 'PulseZ', # Spatial features (same shape as features, i.e. repeated over time steps)
-        'VertexX', 'VertexY', 'VertexZ', # Coordinates (not repeated over time steps)
-        'DeltaLLH', 'PDGEncoding', 'IC86_Dunkman_L6_SANTA_DirectCharge', # Meta
-        'NeutrinoEneregy', 'CascadeEnergy', 'MuonEnergy', 'TrackLength',
-        'InteractionType', 'NumberChannels', 'TotalCharge', ], 
+    tray.AddModule(get_weight_by_flux, 'get_weight_by_flux')
+    tray.AddModule(I3TableWriter, 'I3TableWriter', keys = vertex_features + [
+        # Meta data
+        'PDGEncoding', 'InteractionType', 'NumberChannels', 'NeutrinoEnergy', 
+        'CascadeEnergy', 'MuonEnergy', 'TrackLength', 'DeltaLLH', 'DCFiducialPE',
+        'RunID', 'EventID',
+        # Lookups
+        'NumberHits',
+        # Coordinates and pairwise distances
+        'VertexX', 'VertexY', 'VertexZ', 
+        'COGCenteredVertexX', 'COGCenteredVertexY', 'COGCenteredVertexZ',
+        # Auxilliary targets
+        'PrimaryX', 'PrimaryY', 'PrimaryZ', 
+        'COGCenteredPrimaryX', 'COGCenteredPrimaryY', 'COGCenteredPrimaryZ', 
+        'PrimaryAzimuth', 'PrimaryZenith', 'PrimaryEnergy'
+        # Reconstruction
+        'RecoX', 'RecoY', 'RecoZ', 
+        'COGCenteredRecoX', 'COGCenteredRecoY', 'COGCenteredRecoZ',
+        'RecoAzimuth', 'RecoZenith',
+        # Flux weights
+        'NuMuFlux', 'NueFlux', 'NoFlux',
+        # Debug stuff
+        'PrimaryXOriginal', 'PrimaryYOriginal', 'PrimaryZOriginal',
+        'CMeans', 'COGCenteredCMeans',
+        ], 
                 TableService=I3HDFTableService(outfile),
                 SubEventStreams=['InIceSplit'],
                 BookEverything=False
@@ -278,7 +327,5 @@ if __name__ == '__main__':
     for interaction_type in ('nue', 'numu', 'nutau'):
         paths += glob('/project/6008051/hignight/dragon_3y/{0}/*'.format(interaction_type))
     assert(len(paths) == 1104)
-    print('Processing file ' + str(file_idx))
-    outfile = '/project/6008051/fuchsgru/data/data_dragon_sequential_parts/{0}.hd5'.format(file_idx)
+    outfile = '/project/6008051/fuchsgru/data/data_dragon8_parts/{0}.hd5'.format(file_idx)
     create_dataset(outfile, [paths[file_idx]])
-
