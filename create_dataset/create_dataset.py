@@ -93,7 +93,7 @@ def dom_get_expected_time(omkey, reco):
         expected_time = min(expected_time, cherenkov_time)
     return expected_time + reco.time
 
-def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1.0, charge_scale=1.0):
+def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1.0, charge_scale=1.0, time_delta_scale=1e-3):
     """ Extracts data (charge and time of first arrival) as well as their positions from a frame.
     
     Parameters:
@@ -106,6 +106,8 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1.0, charge_sc
         The normalization constant for charge.
     time_scale : float
         The normalization constant for time.
+    time_delta_scale : float
+        The normalization constant for time deltas.
     
     Returns:
     --------
@@ -128,15 +130,17 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1.0, charge_sc
     omkeys = []
     for omkey, pulses in hits:
         expected_time = dom_get_expected_time(omkey, track_reco)
+        charges, times = [], []
         for pulse in pulses:
             if pulse.charge >= charge_threshold:
                 charges.append(pulse.charge)
-                times.append(pulse.time + frame['TimeShift'])
+                times.append(pulse.time + frame['TimeShift'].value)
 
         charges = np.array(charges) * charge_scale
         if charges.shape[0] == 0: continue # Don't use DOMs that recorded no charge above the threshold
-        times = np.array(times) * time_scale
-        time_delta = times - expected_time
+        times = np.array(times)
+        time_delta = (times - expected_time + track_reco.time) * time_delta_scale
+        times = times * time_scale
         # Calculate the charge weighted standard devation of times
         charge_weighted_mean_time = np.average(times, weights=charges)
         charge_weighted_std_time = np.sqrt(np.average((times - charge_weighted_mean_time)**2, weights=charges))
@@ -156,7 +160,7 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1.0, charge_sc
         features['TimeDeltaStd'].append(charge_weighted_std_time_delta)
         features['TotalCharge'].append(charges.sum())
         for axis in vertices:
-            vertices[axis].append(dom_position[axis])
+            vertices[axis].append(dom_positions[omkey][axis])
         assert omkey not in omkeys
         omkeys.append(omkey)
         #print(omkeys)
@@ -253,9 +257,9 @@ def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_t
     frame['VertexX'] = dataclasses.I3VectorFloat(C[:, 0])
     frame['VertexY'] = dataclasses.I3VectorFloat(C[:, 1])
     frame['VertexZ'] = dataclasses.I3VectorFloat(C[:, 2])
-    frame['COGCenteredVertexX'] = dataclasses.I3VectorFloat(C_cog_centered[:, 0])
-    frame['COGCenteredVertexY'] = dataclasses.I3VectorFloat(C_cog_centered[:, 1])
-    frame['COGCenteredVertexZ'] = dataclasses.I3VectorFloat(C_cog_centered[:, 2])
+    frame['COGCenteredVertexX'] = dataclasses.I3VectorFloat(C_cog[:, 0])
+    frame['COGCenteredVertexY'] = dataclasses.I3VectorFloat(C_cog[:, 1])
+    frame['COGCenteredVertexZ'] = dataclasses.I3VectorFloat(C_cog[:, 2])
 
     ### Output centering and true debug information
     frame['PrimaryXOriginal'] = dataclasses.I3Double(nu.pos.x)
@@ -320,7 +324,7 @@ def create_dataset(outfile, infiles):
         # Auxilliary targets
         'PrimaryX', 'PrimaryY', 'PrimaryZ', 
         'COGCenteredPrimaryX', 'COGCenteredPrimaryY', 'COGCenteredPrimaryZ', 
-        'PrimaryAzimuth', 'PrimaryZenith', 'PrimaryEnergy'
+        'PrimaryAzimuth', 'PrimaryZenith', 'PrimaryEnergy',
         # Reconstruction
         'RecoX', 'RecoY', 'RecoZ', 
         'COGCenteredRecoX', 'COGCenteredRecoY', 'COGCenteredRecoZ',
