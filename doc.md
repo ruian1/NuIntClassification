@@ -1,6 +1,6 @@
 # Documentation of the code and conducted experiements
 
-## Dataset
+# Dataset
 
 The dataset is generated in multiple steps. The original source is an i3 file that contains detector data. From this i3 file a vertex attributed graph is generated for each event. In these events a DOM represents a vertex, while the graph itself is densly connected, meaning that each DOM is connected to each other DOM via an edge, the strength of which corresponds to the spatial distance between the DOMs.
 
@@ -23,5 +23,43 @@ The coordinates are centered arround their mean (possibly charge weighted) and s
 ### Graph Features
 
 For each event the reconstruction is extracted as a graph-wise feature. These include the position (x, y, z) and angles (zenith and azimuth). Coordinates are adjusted to fit the same system as the coordinates of the DOMs.
+
+## Splitting the data
+
+In order to optimize training times, the data is shuffeld and split beforehand, such that the training indices of the samples always are sequential.
+
+## Memory Maps
+
+When training a model, the entire data is loaded as a NumPy memory map. This memory map allows efficient access to the data values and significantly increases training times (from hours to minutes per epoch). Memory maps are also cached in ./memmaps, which decreases the setup time of a model by a large amount.
+
+# Training
+
+Training is done using a json configuration that defines the data and the model architecture and hyperparameters as well as learning parameters such as the learning rate and scheduler. There exists a default configuration, which is overriden by any configuration file.
+
+For each experiment, a model id is generated automatically and results can be refered to by this model id. Performance on the validation as well as testing data, together with model parameters after each epoch are saved.
+
+# Experiments conducted
+
+Training the model on the entire dataset resulted in poor performance. Thus, different training setups were considered.
+
+1. Training on energies with long tracks and low cascade energies (track length >= 70m, cascade energy < 10 GeV)
+
+2. Training NuMu CC vs. Nue CC: The model seems to identify Nue CC as tracks as well, which is why this setup was used
+
+None of the setups above however result in any significant improvements.
+
+## Model evaluation
+
+The jupyter notebook ```baselines.ipynb``` evaluates any model with respect to the testing data (filtered w.r.t. to track length, cascade_energy, etc. ) as well as unfiltered samples. It also creates plots for which features are associated with "trackness" in the original detector data.
+
+# Future Experiments
+
+## Graph Convolutional RNNs
+
+Using the dataset as described above, somewhat neglects temporal information. Thus, one could implement LSTM cells which take graph shaped inputs.
+
+## Standard RNNs
+
+Neglecting the detector topology, one could input the position of a DOM as feature only and feed the hits as sequential vector data into an RNN.
 
 

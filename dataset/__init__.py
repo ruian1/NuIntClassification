@@ -1,6 +1,7 @@
 from .hd5 import *
+from .graph import *
 
 __all__ = [
-    'ShuffledTorchHD5Dataset',
-    'ShuffledTorchHD5DatasetWithGraphFeatures',
+    'ShuffledGraphTorchHD5Dataset',
+    'ShuffledGraphTorchHD5DatasetWithGraphFeatures',
 ]
