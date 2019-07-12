@@ -49,7 +49,7 @@ def dataset_from_config(config, filter_non_train=False, close_file=True):
     dataset_config = config['dataset']
     dataset_type = dataset_config['type'].lower()
     if dataset_type in ('hdf5', 'hd5'):
-        train = ShuffledTorchHD5Dataset(
+        train = ShuffledGraphTorchHD5Dataset(
             dataset_config['paths']['train'],
             features = dataset_config['features'],
             coordinates = dataset_config['coordinates'],
@@ -61,7 +61,7 @@ def dataset_from_config(config, filter_non_train=False, close_file=True):
             class_weights = dataset_config['class_weights'],
             close_file = close_file,
             )
-        val = ShuffledTorchHD5Dataset(
+        val = ShuffledGraphTorchHD5Dataset(
             dataset_config['paths']['validation'],
             features = dataset_config['features'],
             coordinates = dataset_config['coordinates'],
@@ -73,7 +73,7 @@ def dataset_from_config(config, filter_non_train=False, close_file=True):
             class_weights = dataset_config['class_weights'],
             close_file = close_file,
             )
-        test = ShuffledTorchHD5Dataset(
+        test = ShuffledGraphTorchHD5Dataset(
             dataset_config['paths']['test'],
             features = dataset_config['features'],
             coordinates = dataset_config['coordinates'],
@@ -87,7 +87,7 @@ def dataset_from_config(config, filter_non_train=False, close_file=True):
             )
         return train, val, test
     elif dataset_type in ('hdf5_graph_features', 'hd5_graph_features'):
-        train = ShuffledTorchHD5DatasetWithGraphFeatures(
+        train = ShuffledGraphTorchHD5DatasetWithGraphFeatures(
             dataset_config['paths']['train'],
             features = dataset_config['features'],
             coordinates = dataset_config['coordinates'],
@@ -100,7 +100,7 @@ def dataset_from_config(config, filter_non_train=False, close_file=True):
             class_weights = dataset_config['class_weights'],
             close_file = close_file,
             )
-        val = ShuffledTorchHD5DatasetWithGraphFeatures(
+        val = ShuffledGraphTorchHD5DatasetWithGraphFeatures(
             dataset_config['paths']['validation'],
             features = dataset_config['features'],
             coordinates = dataset_config['coordinates'],
@@ -113,7 +113,7 @@ def dataset_from_config(config, filter_non_train=False, close_file=True):
             class_weights = dataset_config['class_weights'],
             close_file = close_file,
             )
-        test = ShuffledTorchHD5DatasetWithGraphFeatures(
+        test = ShuffledGraphTorchHD5DatasetWithGraphFeatures(
             dataset_config['paths']['test'],
             features = dataset_config['features'],
             coordinates = dataset_config['coordinates'],

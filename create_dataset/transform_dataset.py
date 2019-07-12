@@ -78,8 +78,8 @@ def create_dataset(f, idxs, dir, prefix, column_types):
         
 
 if __name__ == '__main__':
-    input = '../data/data_dragon7.hd5'
-    output = '../data/data_dragon7_split'
+    input = '../data/data_dragon8.hd5'
+    output = '../data/data_dragon8_split'
 
     os.makedirs(output, exist_ok=True)
 

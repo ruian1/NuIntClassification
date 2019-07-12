@@ -2,21 +2,21 @@
     "dataset" : {
         "type" : "hd5_graph_features",
         "paths" : {
-            "train" : "../data/data_dragon6_shuffled/train.hd5",
-            "validation" : "../data/data_dragon6_shuffled/val.hd5",
-            "test" : "../data/data_dragon6_shuffled/test.hd5"
+            "train" : "../data/data_dragon8_split/train.hd5",
+            "validation" : "../data/data_dragon8_split/val.hd5",
+            "test" : "../data/data_dragon8_split/test.hd5"
         },
         "features" : [
-            "TimeFirstPulseShifted", "TimeLastPulseShifted", "TimeMaxPulseShifted", "TimeStdShifted",
+            "TimeDeltaFirstPulse", "TimeDeltaLastPulse", "TimeDeltaMaxPulse", "TimeDeltaStd",
             "TimeFirstPulse", "TimeLastPulse", "TimeMaxPulse", "TimeStd",
-            "COGShiftedVertexX", "COGShiftedVertexY", "COGShiftedVertexZ",
+            "COGCenteredVertexX", "COGCenteredVertexY", "COGCenteredVertexZ",
             "VertexX", "VertexY", "VertexZ"
         ],
         "graph_features" : [
             "RecoX", "RecoY", "RecoZ", "RecoAzimuth", "RecoZenith"
         ],
         "coordinates" : [
-            "COGShiftedVertexX", "COGShiftedVertexY", "COGShiftedVertexZ"
+            "COGCenteredVertexX", "COGCenteredVertexY", "COGCenteredVertexZ"
         ],
         "shuffle" : false,
         "balance_classes" : true,
@@ -31,15 +31,15 @@
     },
     "model" : {
         "type" : "gcn_graph_features",
-        "hidden_units_graph_convolutions" : [64, 64, 64, 64, 64],
-        "hidden_units_fully_connected" : [1],
+        "hidden_units_graph_convolutions" : [64, 64, 64, 64, 64, 64, 64, 64],
+        "hidden_units_fully_connected" : [64, 1],
         "hidden_units_graph_mlp" : [64, 64, 64],
         "use_batchnorm" : true,
         "use_residual" : true,
         "dropout_rate" : 0.5
     },
     "training" : {
-        "learning_rate" : 1e-4,
+        "learning_rate" : 1e-3,
         "learning_rate_scheduler_patience" : 2,
         "batch_size" : 64,
         "epochs" : 25,
