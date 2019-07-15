@@ -209,10 +209,11 @@ def event_filter(file, min_track_length=None, max_cascade_energy=None, min_total
         filter[idx_removed] = False
         print(f'After Min Total Energy filter {filter.sum()} / {filter.shape[0]} events remain.')
 
-    # Max total nergy filter
+    # Max total energy filter
     if max_total_energy is not None:
         idx_removed = np.where(total_energy > max_total_energy)[0]
         filter[idx_removed] = False
         print(f'After Max Total Energy filter {filter.sum()} / {filter.shape[0]} events remain.')
+
 
     return filter

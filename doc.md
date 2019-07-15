@@ -79,68 +79,87 @@ The coordinates of each DOM are normalized, before they are fed into the GCN. Th
 
 Another way to incorporate the reconstruction is, to calculate physically when a DOM is expected to recognize charge first, assuming the length and direction of the reconstructed track are correct. It is then possible, to calculate a difference between the time of actually observing any light and this expected time value. The idea is, that for tracks, the difference should not be too large, while for cascade-like events, there is a huge discrepancy to expect. These attributes are also available as features in the hdf5 file, as the scripts for creating datasets calculate these values as well.
 
-A few remarks regarding this calculation: Since 
+A few remarks regarding this calculation: Since for low energy events the tracks are usually short, the entire track is contained inside the detector volume. Thus, not every DOM is expected to see light at all. Therefore, one can also calculate the expected travel time of light from the interaction vertex (where a potentially small cascade occures as well) to any DOM. The smaller arrival time of the one of the track and the cascade is used as a reference value.
 
+Furthermore, light from the track may scatter. Therefore, DOMs, which actually see light originating from a track, might receive a NaN expected time as well. To counteract this issue, the following is done: The track length is temporarily set to "infinite" and the closest point on the track, where the light that a DOM could have seen, is reconstructed. Points which occur after the interaction vertex on the track (in the direction of the track) are kept, since the DOM may have seen light from this point due to scattering. The calcualted expected travel time of course is not truthful there, but at least gives a good approximation. If the estimated point on the track, where the light a DOM could have seen, however is before the interaction vertex (in the direction of the track), the time is discarded and only the cascade time is considered.
 
-
-The dataset is generated in multiple steps. The original source is an i3 file that contains detector data. From this i3 file a vertex attributed graph is generated for each event. In these events a DOM represents a vertex, while the graph itself is densly connected, meaning that each DOM is connected to each other DOM via an edge, the strength of which corresponds to the spatial distance between the DOMs.
-
-### Vertex Features
-
-For each DOM the following attributes are extracted and used to train the network:
-- Charge of the first, last and maximal pulse
-- Time of the first, last and maximal (w.r.t. charge) pulse
-- Time Difference to expectation using the reconstruction of the first, last and maximal (w.r.t. charge) pulse
-- Standard Devation of Pulse Times
-- Coordinates of the DOM (x, y, z)
-
-Time and charge values are scaled to approximately fit a [0, 1] range.
-
-For time values a second set is generated in the following way: Using the track reconstruction (i.e. assuming it was true), one can calculate the time when a DOM is expected to register Cherenkov light. Due to the fact that the Level 6 reconstruction used usually contains a track which is fully enclosed by the detector, many DOMs which actually would see Cherenkov light due to scattering are associated with no value for the expected time. To counteract this issue, the track length is increased to infity, such that estimates for the Cherenkov time (not accounting for scattering obviously) can be obtained at least. Only DOMs, for which the point on the reconstructed track is before the actual interaction vertex, are assigned with a NaN time.
-Also the expected time of light caused by the interaction itself (originating at the interaction vertex) is considered, and which ever is the smaller one is set as the expected time. The features of the dataset contain a difference of the actually observed time at a DOM and the expected time using the reconstruction (cascade and track).
-
-The coordinates are centered arround their mean (possibly charge weighted) and scaled by an empircal value of 50m to resemble an approximate standard devation of ~1. Note that the same transformation is applied to the reconstruction.
-
-### Graph Features
-
-For each event the reconstruction is extracted as a graph-wise feature. These include the position (x, y, z) and angles (zenith and azimuth). Coordinates are adjusted to fit the same system as the coordinates of the DOMs.
-
-## Splitting the data
-
-In order to optimize training times, the data is shuffeld and split beforehand, such that the training indices of the samples always are sequential.
-
-## Memory Maps
-
-When training a model, the entire data is loaded as a NumPy memory map. This memory map allows efficient access to the data values and significantly increases training times (from hours to minutes per epoch). Memory maps are also cached in ./memmaps, which decreases the setup time of a model by a large amount.
 
 # Training
 
-Training is done using a json configuration that defines the data and the model architecture and hyperparameters as well as learning parameters such as the learning rate and scheduler. There exists a default configuration, which is overriden by any configuration file.
+Each training setup is linked to a json configuration file, that specifies the model architecture (number of layers, weather to use batch normalization, dropout, etc.), as well as the data used, together with the learning rate, learning rate scheduler and logging. `default_settings.json` contains default values for all settings. If a setting does not appear in a configuration file, the deafults are read out from this file.
 
-For each experiment, a model id is generated automatically and results can be refered to by this model id. Performance on the validation as well as testing data, together with model parameters after each epoch are saved.
+Since the data contains almost two million events, the data loading process is a huge bottleneck of the entire training. To counteract this issue, whenever an hdf5 file is loaded, a numpy memory map (`memmap`) is generated. This memmap enables faster access to the attributes, since it already is shaped as numpy array. Also, over several training setups, these memmaps will be cached. For a certain setting of data, a hash is generated, which can be used to identify the same dataset again in the future. Therefore, if the data setup does not change, loading the data only takes a few seconds. When new data is however used, or settings to the dataset are, there is a very large overhead generated by the creation of those memmaps. They are stored in `memmaps/`.
 
-# Experiments conducted
+Each time an experiment is conducted (i.e. a model is trained), the model itself is identified with a randomly generated id. This id can be used to re-load the model again later on and evalute its performance in detail. The model parameters as well as logfiles are stored in `training/hd5_{mode_id}/` for each model.
 
-Training the model on the entire dataset resulted in poor performance. Thus, different training setups were considered.
+## Model architectures
 
-1. Training on energies with long tracks and low cascade energies (track length >= 70m, cascade energy < 10 GeV)
+Typically models contained 5-8 hidden layers, each with a hidden embedding size of 64. Batchnormalization was used as well as dropout with dropout-rates between 0.3 and 0.5. Residual connections were enabled. Performance did somewhat decrease for models without Batchnormalization, also the learning progress was much slower. Overall however, the number of hidden layers did not yield any significant performance discrepancies.
 
-2. Training NuMu CC vs. Nue CC: The model seems to identify Nue CC as tracks as well, which is why this setup was used
+## Event filtering
 
-None of the setups above however result in any significant improvements.
+The training data can be filtered before a model is actually trained. This may be beneficial for certain scenarios (see below). Currently supported filters are:
+- Length of the true track (only applied to NuMu CC events)
+- Energy used up in the cascade at the interaction vertex (only applied to NuMu CC events)
+- neutrino flavor
+- neutrino interaction type
+- minimal total energy
+- maximal total energy
 
-## Model evaluation
+Since each filter results in a different training dataset, when a filter changes, new memmaps are created. By default, no filter is appleid to the validation and testing data (which however an be adapted).
 
-The jupyter notebook ```baselines.ipynb``` evaluates any model with respect to the testing data (filtered w.r.t. to track length, cascade_energy, etc. ) as well as unfiltered samples. It also creates plots for which features are associated with "trackness" in the original detector data.
+# Model evaluation
 
+During training, the performance of a model on the validation data is logged in terms of accuracy and positive prediction rate. The latter is used to verfiy, that the model did not degrade to a "always predict the same class" classifier.
+
+To further investigate a models preformance and predictions, a notebook `baselines.ipynb` is available which compares the model the Likelihood Baseline currently used to identify tracks. It re-evaluates the model on test data and plots the predicted fraction of tracks per neutrino flavor and interaction type. Also, the correlation between an input feature and the predicted trackness is plotted, to observe, if the model has learned any "simple" classification rule.
+
+To investigate the dataset, another notebook `data.ipynb` can be used to plot the transformed DOM coordinates together with the adjacency matrix of any event. This can be used to investigate in details, which kind of events the model did not classify correctly.
+
+# Results
+
+## Models trained on an unbalanced dataset
+
+Models that were trained on a dataset that contained a class imbalance (tracks vs. non-tracks) typically degraded into one-class-predictors, which only assinged "non-track" to each sample. Thus, two methods to counteract this, were implemented:
+- Discarding random samples of the class with more samples such that they match in size
+- Compute weights for each class that are taken into account for the loss-function
+
+Both were used and successfully counteracted the issue, however the classification performance was rather poor.
+
+## Traits picked up by the classifier
+
+The most "recently" implemented models tend to associate high event energy (i.e. energy of the neutrino) with "trackness", which of course is not the case. Also, it seems that the classifier misclassifies electron neutrino interactions (CC) for tracks. Even training specifically only samples of nue CC vs. numu CC did not yield any remedy to this issue.
+
+## Training on "nice" tracks
+
+The dataset was also filtered to discard tracks that appear cascade-like because of their low track length or too high cascade energy. The resulting filtered dataset only has very "obvious" and "nice" tracks. The idea is, that with this kind of dataset, the model should easier be able to pick up the "traits" of a track-shaped event. However, this did not turn out to improve the model performance on the overall dataset (while performance on nice-tracks improved).
+
+## Exclude charge from the attributes of a vertex (DOM)
+
+In order to prevent the model from learning the (wrong) association bertween high energy and "trackness", also charge was kept as a parameter from the model, which however did not result in any significant performance change.
+
+## Filter values
+
+The following values for the dataset filters were tried and used most of the time as reference:
+- minimal track length: 70m / 75m
+- maximal cascade energy: 10 GeV
+- balancing the data classes: yes
 # Future Experiments
 
-## Graph Convolutional RNNs
-
-Using the dataset as described above, somewhat neglects temporal information. Thus, one could implement LSTM cells which take graph shaped inputs.
 
 ## Standard RNNs
 
 Neglecting the detector topology, one could input the position of a DOM as feature only and feed the hits as sequential vector data into an RNN.
+
+Data has already been setup and needs to be checked and preprocessed, before a model can actually be trained. Other similar approaches on IceCube data promise some results at least.
+
+## Graph Convolutional RNNs
+
+Another, more sensible approach, that considers both the temporal evolution as well as the topology of the signal, would be to implement Graph Convolutional LSTMs as builing blocks of an RNN. This follows somewhat https://arxiv.org/pdf/1812.04206.pdf, without actually computing the graph Laplacians however (relying on an implementation of the Graph Convolution as above).
+
+This way, a set of graphs (adding a new vertex for each trigger at a DOM) can be inputted to the GCRNN. That is, for each new pulse recorded by a DOM, the DOM is added to the graph is not present or the time and charge values are updated. The first "frame" of one event would be a single vertex graph, while the last "frame" would contain all vertices and show their latest hit time as well as the corresponding charge.
+
+Creation of such a dataset is currently not implemented, and neither are models.
+
 
 
