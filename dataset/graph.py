@@ -42,9 +42,9 @@ class ShuffledGraphTorchHD5Dataset(ShuffledTorchHD5Dataset):
         targets = self._create_targets()
         self._idxs = self._create_idxs(targets, balance_dataset, min_track_length, max_cascade_energy, flavors, currents)
         number_vertices = np.array(self.file['NumberVertices'])
-        event_offsets = number_vertices.cumsum() - number_vertices
+        event_offsets = (number_vertices.cumsum() - number_vertices)[self._idxs]
         self.number_vertices = number_vertices[self._idxs]
-        self.event_offsets = self.number_vertices.cumsum() - self.number_vertices
+        self.event_offsets = self.number_vertices.cumsum() - self.number_vertices # 'self.event_offests' refers to the feature matrix, while 'event_offsets' refers to the hd5 file
         self.targets = targets[self._idxs]
 
         # Create memmaps for features and coordinates for faster access during training
@@ -64,7 +64,7 @@ class ShuffledGraphTorchHD5Dataset(ShuffledTorchHD5Dataset):
 
         if not os.path.exists(feature_memmap_path) or not os.path.exists(coordinate_memmap_path):
             # Create an index set that operates on vertex features, which is used to build memmaps efficiently
-            _vertex_idxs = np.concatenate([np.arange(start, end) for start, end in zip(self.event_offsets, self.event_offsets + self.number_vertices)]).tolist()
+            _vertex_idxs = np.concatenate([np.arange(start, end) for start, end in zip(event_offsets, event_offsets + self.number_vertices)]).tolist()
             number_samples = len(_vertex_idxs)
         else:
             _vertex_idxs = None
