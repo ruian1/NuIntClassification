@@ -161,6 +161,8 @@ if __name__ == '__main__':
         patience=settings['training']['learning_rate_scheduler_patience'], min_lr=settings['training']['min_learning_rate'])
     elif lr_scheduler_type.lower() == 'exponential_decay':
         lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, settings['training']['learning_rate_decay'])
+    elif lr_scheduler_type.lower() == 'constant':
+        lr_scheduler = None
     else:
         raise RuntimeError(f'Unkown learning rate scheduler strategy {lr_scheduler_type}')
 
@@ -200,7 +202,8 @@ if __name__ == '__main__':
         for metric, value in evaluate_model(model, val_loader, loss_function, logfile=logfile).items():
             validation_metrics[metric].append(value)
         # Update learning rate, scheduler uses last accuracy as cirterion
-        lr_scheduler.step(validation_metrics['accuracy'][-1])
+        if lr_scheduler:
+            lr_scheduler.step(validation_metrics['accuracy'][-1])
 
         # Save model parameters
         checkpoint_path = os.path.join(training_dir, f'model_{epoch + 1}')
