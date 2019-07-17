@@ -9,9 +9,12 @@ import tables
 import numpy as np
 import pickle
 from sklearn.metrics import pairwise_distances
-from icecube import NuFlux # genie_icetray
+#from icecube import NuFlux # genie_icetray
 
-flux_service  = NuFlux.makeFlux("IPhonda2014_spl_solmin")
+try:
+    flux_service  = NuFlux.makeFlux("IPhonda2014_spl_solmin")
+except:
+    flux_service = None # If NuFlux is not available, use uniform weights
 
 # Parses i3 files in order to create a (huge) hdf5 file that contains all events of all files
 with open('/project/6008051/fuchsgru/NuIntClassification/dom_positions.pkl', 'rb') as f:
@@ -176,6 +179,12 @@ def get_weight_by_flux(frame):
     frame : ?
         The frame to process.
     """
+    # If no flux service is available, use uniform weights
+    if flux_service is None:
+        frame['NuMuFlux'] = dataclasses.I3Double(1.0)
+        frame['NueFlux'] = dataclasses.I3Double(1.0)
+        frame['NoFlux'] = dataclasses.I3Double(1.0)
+        return True
     true_neutrino = dataclasses.get_most_energetic_neutrino(frame["I3MCTree"])
     true_nu_energy  = true_neutrino.energy
     true_nu_coszen  = np.cos(true_neutrino.dir.zenith)
