@@ -1,7 +1,7 @@
 import numpy as np
 import json
 import torch
-from create_dataset import create_dataset
+from ..create_dataset import create_dataset
 import util
 
 # Define the model architecture and parameters

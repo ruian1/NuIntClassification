@@ -2,6 +2,9 @@ import h5py
 from glob import glob
 import sys
 
+# Use the 'DeltaLLH' column of the dataset to retrieve the number of events per datafile
+PER_EVENT_COLUMN = 'DeltaLLH'
+
 if __name__ == '__main__':
     pattern = sys.argv[1]
     outfile = sys.argv[2]
@@ -31,11 +34,15 @@ if __name__ == '__main__':
 
     # Create output file
     with h5py.File(outfile, 'w') as outfile:
+        # Create a dataset column for storing filenames
+        outfile.create_dataset('filepath', (dimensions[PER_EVENT_COLUMN],), dtype=h5py.special_dtype(vlen=bytes))
         for key in dimensions:
             outfile.create_dataset(key, (dimensions[key],), dtype=dtypes[key])
         print(f'Created output file, filling now...')
         for path in paths:
             with h5py.File(path) as src:
+                n_events = src[PER_EVENT_COLUMN].shape[0]
+                outfile['filepath'][offsets[PER_EVENT_COLUMN] : offsets[PER_EVENT_COLUMN] + size] = bytes(filepath, encoding='ASCII')
                 for key in dimensions:
                     print(f'\rCopying {key} from {path}...                             ', end='\r')
                     size = src[key].shape[0]
