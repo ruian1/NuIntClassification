@@ -192,8 +192,8 @@ def get_weight_by_flux(frame):
     return True
 
 
-event_offset = 0L
-distances_offset = 0L
+event_offset = 0
+distances_offset = 0
 
 def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_to_features=False):
     """ Processes a frame to create an event graph and metadata out of it.
@@ -304,7 +304,7 @@ def create_dataset(outfile, infiles):
     """
     global event_offset
     global distances_offset
-    event_offset, distances_offset = 0L, 0L
+    event_offset, distances_offset = 0, 0
     infiles = infiles
     tray = I3Tray()
     tray.AddModule('I3Reader',

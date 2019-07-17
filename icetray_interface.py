@@ -74,7 +74,7 @@ def classify_event(frame):
     C = np.zeros((1, C.shape[0], len(coordinate_columns)))
     for coordinate_idx, coordinate in enumerate(coordinate_columns):
         C[0, :, coordinate_idx] = features[coordinate]
-    F = np.zeros((1, len(graph_feature_columns))):
+    F = np.zeros((1, len(graph_feature_columns)))
     for graph_feature_idx, graph_feature in enumerate(graph_feature_columns):
         F[0, graph_feature_idx] = graph_features[graph_feature]
     masks = np.ones((1, C.shape[0], C.shape[0]))
