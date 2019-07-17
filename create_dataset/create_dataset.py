@@ -17,7 +17,7 @@ except:
     flux_service = None # If NuFlux is not available, use uniform weights
 
 # Parses i3 files in order to create a (huge) hdf5 file that contains all events of all files
-with open('/project/6008051/fuchsgru/NuIntClassification/dom_positions.pkl', 'rb') as f:
+with open('../dom_positions.pkl', 'rb') as f:
     dom_positions = pickle.load(f)
 
 # Speed of light in ice (m/ns)
