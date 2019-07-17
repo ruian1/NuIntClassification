@@ -17,7 +17,7 @@ except:
     flux_service = None # If NuFlux is not available, use uniform weights
 
 # Parses i3 files in order to create a (huge) hdf5 file that contains all events of all files
-with open('../dom_positions.pkl', 'rb') as f:
+with open('../dom_positions2.pkl', 'rb') as f:
     dom_positions = pickle.load(f)
 
 # Speed of light in ice (m/ns)
@@ -132,6 +132,7 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1.0, charge_sc
     # For each event compute event features based on the pulses
     omkeys = []
     for omkey, pulses in hits:
+        omkey = tuple(omkey) # The pickle maps triplets to positions
         expected_time = dom_get_expected_time(omkey, track_reco)
         charges, times = [], []
         for pulse in pulses:
