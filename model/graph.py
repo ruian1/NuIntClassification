@@ -197,7 +197,7 @@ class GaussianKernel(nn.Module):
             Adjacency matrices for each event.
         """
         D = pairwise_distances(C)
-        A = torch.exp(-self.inverse_sigma * D)
+        A = torch.exp(-(self.inverse_sigma**2) * D)
         A = padded_softmax(A, masks, -1)
         return A
 

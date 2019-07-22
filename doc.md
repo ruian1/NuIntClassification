@@ -63,7 +63,7 @@ Another approach (which however is not fully implemented yet) is to let the netw
 
 The dataset is obtained following multiple steps, starting at the i3 files, which contain simulations of neutrinos for IceCube. Only for simulated data ground truth class labels are available, so one has to resort to Monte Carlo datasets.
 
-All i3 files are aggregated into a single large hdf5 file that contains all events that are available. The python scripts `create_dataset/create_dataset.py` and `create_dataset/create_recurrent_dataset.py` are responsible for parsing a single i3 file each and storing the ouput into an hdf5 file. Since parsing an i3 file and handling its content requires the `icetray` package, it has to be run withing a singularity environment. The slurm script as well as a shell script to wrap this process are designed to operate on computecanada's `cedar` cluster.
+All i3 files are aggregated into a single large hdf5 file that contains all events that are available. The python scripts `create_dataset/create_dataset.py` and `create_dataset/create_recurrent_dataset.py` are responsible for parsing a single i3 file each and storing the ouput into an hdf5 file each. For each i3 file a single hdf5 file is created. Since parsing an i3 file and handling its content requires the `icetray` package, it has to be run within a singularity environment. The slurm script as well as a shell script to wrap this process are designed to operate on computecanada's `cedar` cluster.
 
 Jobs for creating datasets (`create_dataset/create_dataset_slurm_job.sh` and `create_dataset/create_recurrent_dataset_slurm_job.sh`) are supposed to be run as array-jobs, where the number of jobs should match the number of i3 files to be parsed.
 
@@ -108,7 +108,7 @@ The training data can be filtered before a model is actually trained. This may b
 
 Since each filter results in a different training dataset, when a filter changes, new memmaps are created. By default, no filter is appleid to the validation and testing data (which however an be adapted).
 
-# Model evaluation
+# Model performance
 
 During training, the performance of a model on the validation data is logged in terms of accuracy and positive prediction rate. The latter is used to verfiy, that the model did not degrade to a "always predict the same class" classifier.
 
@@ -144,8 +144,19 @@ The following values for the dataset filters were tried and used most of the tim
 - minimal track length: 70m / 75m
 - maximal cascade energy: 10 GeV
 - balancing the data classes: yes
-# Future Experiments
 
+## Performance
+
+Training on the entire dataset (balancing the number of samples per class) as well as training electron neutrinos vs. muon neutrions (CC only) resulted in the best performance so far. Both models are able to achieve an accuracy of about 61% on the entire dataset. The number of layers as well as the hidden dimensionality did not provide any significant improvements so far.
+
+# Using the Model on new data
+
+A trained model can be used to classify real-world events (data). The `interface/icetray.py` was designed to include a method that takes an i3-frame as input and returns the trackness score. This however requires, that `icetray` as well as `torch` are run within the same python environment, which so far is not working properly. 
+
+Alternatively, one can transform the new detector data into the same format that the training, testing and validation data uses. The wrapper script `evaluate.py`
+allows to evaluate the model on any hd5 dataset, printing out the accuracy as well as mapping (filename, event id) -> prediction in a pickle file. A disadvantage of this method however is, that any data has to go through the entire dataset creation pipeline (see section 'Dataset') to fit the format required by the model. If no ground-truth class labels are at-hand, one has to make those up (the code expects there to be ground truth information), even though the evaluation code does not consider it at all.
+
+# Future Experiments
 
 ## Standard RNNs
 
