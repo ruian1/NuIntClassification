@@ -9,6 +9,7 @@
         "features" : [
             "TimeDeltaFirstPulse", "TimeDeltaLastPulse", "TimeDeltaMaxPulse", "TimeDeltaStd",
             "TimeFirstPulse", "TimeLastPulse", "TimeMaxPulse", "TimeStd",
+            "ChargeFirstPulse", "ChargeLastPulse", "ChargeMaxPulse",
             "COGCenteredVertexX", "COGCenteredVertexY", "COGCenteredVertexZ",
             "VertexX", "VertexY", "VertexZ"
         ],
@@ -21,12 +22,16 @@
         "shuffle" : false,
         "balance_classes" : true,
         "min_track_length" : null,
-        "max_cascade_energy" : null
+        "max_cascade_energy" : null,
+        "flavors" : [
+            12, 14
+        ],
+        "currents" : [1]
     },
     "model" : {
         "type" : "gcn_graph_features",
         "hidden_units_graph_convolutions" : [128, 128, 128, 128, 128, 128, 128],
-        "hidden_units_fully_connected" : [64, 32, 1],
+        "hidden_units_fully_connected" : [64, 64, 1],
         "hidden_units_graph_mlp" : [64, 64, 64],
         "use_batchnorm" : true,
         "use_residual" : true,
