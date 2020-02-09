@@ -2,19 +2,18 @@
     "dataset" : {
         "type" : "hd5",
         "paths" : {
-            "train" : "../data/data_dragon6_shuffled/train.hd5",
-            "validation" : "../data/data_dragon6_shuffled/val.hd5",
-            "test" : "../data/data_dragon6_shuffled/test.hd5"
+            "train" : "../data/data_dragon8_split/train.hd5",
+            "validation" : "../data/data_dragon8_split/val.hd5",
+            "test" : "../data/data_dragon8_split/test.hd5"
         },
         "features" : [
-            "TimeFirstPulseShifted", "TimeLastPulseShifted", "TimeMaxPulseShifted", "TimeStdShifted",
             "ChargeFirstPulse", "ChargeLastPulse", "ChargeMaxPulse",
             "TimeFirstPulse", "TimeLastPulse", "TimeMaxPulse", "TimeStd",
-            "COGShiftedVertexX", "COGShiftedVertexY", "COGShiftedVertexZ",
+            "COGCenteredVertexX", "COGCenteredVertexY", "COGCenteredVertexZ",
             "VertexX", "VertexY", "VertexZ"
         ],
         "coordinates" : [
-            "COGShiftedVertexX", "COGShiftedVertexY", "COGShiftedVertexZ"
+            "COGCenteredVertexX", "COGCenteredVertexY", "COGCenteredVertexZ"
         ],
         "shuffle" : false,
         "max_charge" : null,
@@ -25,14 +24,14 @@
     },
     "model" : {
         "type" : "gcn",
-        "hidden_units_graph_convolutions" : [64, 64, 64, 64, 64, 64, 64],
+        "hidden_units_graph_convolutions" : [64, 128, 256, 256, 128, 64],
         "hidden_units_fully_connected" : [1],
         "use_batchnorm" : true,
         "use_residual" : true,
-        "dropout_rate" : 0.5
+        "dropout_rate" : 0.3
     },
     "training" : {
-        "learning_rate" : 1e-2,
+        "learning_rate" : 1e-3,
         "min_learning_rate" : 1e-6,
         "learning_rate_scheduler_patience" : 3,
         "batch_size" : 64,
