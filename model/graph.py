@@ -51,7 +51,7 @@ def padded_softmax(X, masks, axis=-1, keepdim=True, epsilon=1e-8):
     normalized : torch.FloatTonsor, shape [batch_size, ...]
         The normalized data.
     """
-    X = torch.exp(-X) * masks
+    X = torch.exp(X) * masks
     normalization = torch.sum(X, axis, keepdim=True)
     return X / (normalization + epsilon)
 
