@@ -7,7 +7,6 @@
             "test" : "../data/data_dragon8_split/test.hd5"
         },
         "features" : [
-            "TimeDeltaFirstPulse", "TimeDeltaLastPulse", "TimeDeltaMaxPulse", "TimeDeltaStd",
             "TimeFirstPulse", "TimeLastPulse", "TimeMaxPulse", "TimeStd",
             "ChargeFirstPulse", "ChargeLastPulse", "ChargeMaxPulse",
             "COGCenteredVertexX", "COGCenteredVertexY", "COGCenteredVertexZ",
@@ -23,25 +22,23 @@
         "balance_classes" : true,
         "min_track_length" : null,
         "max_cascade_energy" : null,
-        "flavors" : [
-            12, 14
-        ],
-        "currents" : [1]
+        "flavors" : null,
+        "currents" : null
     },
     "model" : {
         "type" : "gcn_graph_features",
-        "hidden_units_graph_convolutions" : [128, 128, 128, 128, 128, 128, 128],
-        "hidden_units_fully_connected" : [64, 64, 1],
-        "hidden_units_graph_mlp" : [64, 64, 64],
+        "hidden_units_graph_convolutions" : [64, 128, 256, 512, 512, 256, 128, 64],
+        "hidden_units_fully_connected" : [64, 1],
+        "hidden_units_graph_mlp" : [64, 64],
         "use_batchnorm" : true,
         "use_residual" : true,
-        "dropout_rate" : 0.5
+        "dropout_rate" : 0.3
     },
     "training" : {
-        "learning_rate" : 1e-2,
-        "learning_rate_scheduler_patience" : 2,
-        "batch_size" : 64,
-        "epochs" : 25,
+        "learning_rate" : 5e-3,
+        "learning_rate_scheduler_patience" : 5,
+        "batch_size" : 32,
+        "epochs" : 50,
         "directory" : "./training/hd5-{0}",
         "checkpoint_period" : 1,
         "use_class_weights" : true

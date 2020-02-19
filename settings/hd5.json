@@ -1,3 +1,4 @@
+
 {
     "dataset" : {
         "type" : "hd5",
@@ -13,7 +14,7 @@
             "VertexX", "VertexY", "VertexZ"
         ],
         "coordinates" : [
-            "COGCenteredVertexX", "COGCenteredVertexY", "COGCenteredVertexZ"
+            "VertexX", "VertexY", "VertexZ"
         ],
         "shuffle" : false,
         "max_charge" : null,
@@ -24,18 +25,18 @@
     },
     "model" : {
         "type" : "gcn",
-        "hidden_units_graph_convolutions" : [64, 128, 256, 256, 128, 64],
+        "hidden_units_graph_convolutions" : [64, 128, 256, 512, 512, 256, 128, 64],
         "hidden_units_fully_connected" : [1],
         "use_batchnorm" : true,
         "use_residual" : true,
         "dropout_rate" : 0.3
     },
     "training" : {
-        "learning_rate" : 1e-3,
-        "min_learning_rate" : 1e-6,
-        "learning_rate_scheduler_patience" : 3,
-        "batch_size" : 64,
-        "epochs" : 100,
+        "learning_rate" : 1e-2,
+        "min_learning_rate" : 5e-5,
+        "learning_rate_scheduler_patience" : 5,
+        "batch_size" : 32,
+        "epochs" : 50,
         "directory" : "./training/hd5-{0}",
         "checkpoint_period" : 1
     },
