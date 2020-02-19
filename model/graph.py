@@ -59,7 +59,7 @@ def padded_softmax(X, masks, axis=-1, keepdim=True, epsilon=1e-8):
 class GraphConvolution(nn.Module):
     """ Module that implements graph convolutions. """
 
-    def __init__(self, input_dim, output_dim, use_bias=True, activation=True, dropout_rate=None, use_batchnorm=False,
+    def __init__(self, input_dim, output_dim, use_bias=None, activation=True, dropout_rate=None, use_batchnorm=False,
         use_residual=True):
         """ Initializes the graph convolution.
         
@@ -69,8 +69,9 @@ class GraphConvolution(nn.Module):
             Number of input features.
         output_dim : int
             Number of output features.
-        use_bias : bool
+        use_bias : bool or None
             If to use a bias for the linear transformation.
+            If None, bias is used whenever batchnorm is not.
         activation : bool
             If an activation function should be applied to the embedding.
         dropout_rate : float or None
