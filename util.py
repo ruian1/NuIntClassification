@@ -24,7 +24,7 @@ def dict_update(d, u):
         else:
             raise RuntimeError(f'Unkown setting {key}')
 
-def dataset_from_config(config, filter_non_train=False, close_file=True):
+def dataset_from_config(config, filter_non_train=False, close_file=False):
     """ Creates a dataset from a configuration file. 
     
     Parameters:

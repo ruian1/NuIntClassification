@@ -27,12 +27,12 @@
     },
     "model" : {
         "type" : "gcn_graph_features",
-        "hidden_units_graph_convolutions" : [64, 128, 256, 512, 512, 256, 128, 64],
-        "hidden_units_fully_connected" : [64, 1],
-        "hidden_units_graph_mlp" : [64, 64],
+        "hidden_units_graph_convolutions" : [64, 64, 64, 64, 64, 64],
+        "hidden_units_fully_connected" : [128, 1],
+        "hidden_units_graph_mlp" : [64],
         "use_batchnorm" : true,
         "use_residual" : true,
-        "dropout_rate" : 0.3
+        "dropout_rate" : 0.5
     },
     "training" : {
         "learning_rate" : 5e-3,

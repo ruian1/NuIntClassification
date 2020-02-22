@@ -6,7 +6,7 @@ class ShuffledGraphTorchHD5Dataset(ShuffledTorchHD5Dataset):
 
     def __init__(self, filepath, features=['CumulativeCharge', 'Time', 'FirstCharge'], coordinates=['VertexX', 'VertexY', 'VertexZ'], 
         balance_dataset=False, min_track_length=None, max_cascade_energy=None, flavors=None, currents=None,
-        memmap_directory='./memmaps', close_file=True, 
+        memmap_directory='./memmaps', close_file=False, 
         class_weights=None):
         """ Initializes the Dataset. 
         
