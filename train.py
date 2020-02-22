@@ -89,8 +89,8 @@ def evaluate_model(model, data_loader, loss_function, prefix, iteration, tb_writ
     metrics['loss'] = total_loss / len(data_loader)
 
     if tb_writer:
-        tb_writer.add_scalar(f'{prefix} loss', loss.item(), iteration)
-        tb_writer.add_scalar(f'{prefix} accuracy', batch_metrics['accuracy'], iteration)
+        tb_writer.add_scalar(f'{prefix} loss', metrics['loss'], iteration)
+        tb_writer.add_scalar(f'{prefix} accuracy', metrics['accuracy'], iteration)
         tb_writer.add_scalar(f'{prefix} mean trackness', y_pred.mean(), iteration)
         energy = np.array(data_loader.dataset.file['NeutrinoEnergy'])
         tb_writer.add_scalar(f'{prefix} spearman correlation energy - trackness', spearmanr(energy, y_pred.flatten())[0], iteration)
