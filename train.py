@@ -11,18 +11,16 @@ import argparse
 from glob import glob
 from collections import Mapping, defaultdict
 import time
+import torch.utils.tensorboard as tb
+import datetime
 
 from sklearn.metrics import roc_auc_score, accuracy_score, f1_score, confusion_matrix
+from scipy.stats import spearmanr
 
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torch import nn
 
-def log(logfile, string):
-    """ Prints a string and puts into the logfile if present. """
-    print(string)
-    if logfile is not None:
-        logfile.write(str(string) + '\n')
 
 
 def get_metrics(y_true, y_pred):
@@ -51,7 +49,7 @@ def get_metrics(y_true, y_pred):
     return metrics
     
 
-def evaluate_model(model, data_loader, loss_function, logfile=None):
+def evaluate_model(model, data_loader, loss_function, prefix, iteration, tb_writer=None):
     """ Evaluates the model performance on a dataset (validation or test).
     
     Parameters:
@@ -62,8 +60,12 @@ def evaluate_model(model, data_loader, loss_function, logfile=None):
         Loader for the dataset to evaluate on.
     loss_function : torch.nn.Loss
         The loss function that is optimized.
-    logfile : file-like or None
-        The file to put logs into.
+    prefix : str
+        The name of the evaluation, i.e. 'validation' or 'test'
+    iteration : int
+        The current evaluation iteration.
+    tb_writer : SummaryWriter or None
+        Tensorboard writer for logging.
 
     Returns:
     --------
@@ -85,9 +87,16 @@ def evaluate_model(model, data_loader, loss_function, logfile=None):
 
     metrics = get_metrics(y_true, y_pred)
     metrics['loss'] = total_loss / len(data_loader)
+
+    if tb_writer:
+        tb_writer.add_scalar(f'{prefix} loss', metrics['loss'], iteration)
+        tb_writer.add_scalar(f'{prefix} accuracy', metrics['accuracy'], iteration)
+        tb_writer.add_scalar(f'{prefix} mean trackness', y_pred.mean(), iteration)
+        energy = np.array(data_loader.dataset.file['NeutrinoEnergy'])
+        tb_writer.add_scalar(f'{prefix} spearman correlation energy - trackness', spearmanr(energy, y_pred.flatten())[0], iteration)
     
     values = ' -- '.join(map(lambda metric: f'{metric} : {(metrics[metric]):.4f}', metrics))
-    log(logfile, f'\nMetrics: {values}')
+    print(f'\nMetrics: {values}')
     return metrics
 
 
@@ -97,8 +106,11 @@ if __name__ == '__main__':
     parser.add_argument('config', help='Configuration for the training. See default_settings.json for the default settings. Values are updated with the settings passed here.')
     parser.add_argument('--array', help='If set, the "config" parameter refers to a regex. Needs the file index parameter.', action='store_true')
     parser.add_argument('-i', type=int, help='Index of the file in the directory to use as configuration file. Only considered if "--array" is set.')
+    parser.add_argument('--verbose', help='If set, logs to stdout.', action='store_true')
     args = parser.parse_args()
 
+
+    verbose = args.verbose
     default_settings_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'default_settings.json')
     if args.array:
         config_path = glob(args.config)[args.i]
@@ -110,19 +122,15 @@ if __name__ == '__main__':
     with open(config_path) as f:
         util.dict_update(settings, json.load(f))
 
-    # Create a logfile
-    if settings['training']['logfile']:
-        logfile = open(settings['training']['logfile'], 'w+')
-    else:
-        logfile = None
 
-    log(logfile, f'### Training according to configuration {config_path}')
+
+    print(f'### Training according to configuration {config_path}')
 
     # Set up the directory for training and saving the model
     model_idx = np.random.randint(10000000000)
-    log(logfile, f'### Generating a model id: {model_idx}')
+    print(f'### Generating a model id: {model_idx}')
     training_dir = settings['training']['directory'].format(model_idx)
-    log(logfile, f'### Saving to {training_dir}')
+    print(f'### Saving to {training_dir}')
     os.makedirs(training_dir, exist_ok=True)
 
     # Create a seed if non given
@@ -131,6 +139,20 @@ if __name__ == '__main__':
         print(f'Seeded with the model id ({model_idx})')
 
     np.random.seed(settings['seed'] & 0xFFFFFFFF)
+    torch.manual_seed(settings['seed'] & 0xFFFFFFFF)
+
+    # Tensorboard logging
+    if settings['training']['logdir']:
+        date = datetime.datetime.now()
+        timestamp = date.strftime(f"%d-%b-%Y_%H.%M.%S")
+        logdir = os.path.join(settings['training']['logdir'], f'{timestamp}_{model_idx}')
+        os.makedirs(logdir)
+        tb_writer = tb.SummaryWriter(logdir)
+    else:
+        tb_writer = None
+
+    #tb_writer.add_hparams(hparam_dict={'configuration' : str(settings)}, metric_dict={})
+    tb_writer.add_text('configuration', str(settings))
 
     # Save a copy of the settings
     with open(os.path.join(training_dir, 'config.json'), 'w+') as f:
@@ -147,8 +169,8 @@ if __name__ == '__main__':
     model = util.model_from_config(settings)
     if torch.cuda.is_available():
         model = model.cuda()
-        log(logfile, "Training on GPU")
-        log(logfile, "GPU type:\n{}".format(torch.cuda.get_device_name(0)))
+        print("Training on GPU")
+        print("GPU type:\n{}".format(torch.cuda.get_device_name(0)))
     if settings['training']['loss'].lower() == 'binary_crossentropy':
         loss_function = nn.functional.binary_cross_entropy
     else:
@@ -169,7 +191,7 @@ if __name__ == '__main__':
     validation_metrics = defaultdict(list)
     training_metrics = defaultdict(list)
 
-    log(logfile, f'Training on {len(data_train)} samples.')
+    print(f'Training on {len(data_train)} samples.')
 
     epochs = settings['training']['epochs']
     for epoch in range(epochs):
@@ -194,12 +216,19 @@ if __name__ == '__main__':
             # Estimate ETA
             dt = time.time() - t0
             eta = dt * (len(train_loader) / (batch_idx + 1) - 1)
-
-            print(f'\r{batch_idx + 1} / {len(train_loader)}: batch_loss {loss.item():.4f} -- epoch_loss {running_loss / (batch_idx + 1):.4f} -- epoch acc {running_accuracy / (batch_idx + 1):.4f} -- mean of preds / targets {y_pred.mean():.4f} / {targets.mean():.4f} # ETA: {int(eta):6}s      ', end='\r')
+            if verbose:
+                print(f'\r{batch_idx + 1} / {len(train_loader)}: batch_loss {loss.item():.4f} -- epoch_loss {running_loss / (batch_idx + 1):.4f} -- epoch acc {running_accuracy / (batch_idx + 1):.4f} -- mean of preds / targets {y_pred.mean():.4f} / {targets.mean():.4f} # ETA: {int(eta):6}s      ', end='\r')
+            if tb_writer:
+                train_iteration = epoch * len(train_loader) + batch_idx
+                tb_writer.add_scalar('train loss', loss.item(), train_iteration)
+                tb_writer.add_scalar('train accuracy', batch_metrics['accuracy'], train_iteration)
+                tb_writer.add_scalar('mean trackness', y_pred.mean(), train_iteration)
+                energy = np.array(data_train.file['NeutrinoEnergy'][data_train._idxs[batch_idx * batch_size : (batch_idx + 1) * batch_size]])
+                tb_writer.add_scalar('spearman correlation energy - prediction', spearmanr(energy, y_pred.flatten())[0], train_iteration)
 
         # Validation
-        log(logfile, '\n### Validation:')    
-        for metric, value in evaluate_model(model, val_loader, loss_function, logfile=logfile).items():
+        print('\n### Validation:')    
+        for metric, value in evaluate_model(model, val_loader, loss_function, 'validation', epoch, tb_writer=tb_writer).items():
             validation_metrics[metric].append(value)
         # Update learning rate, scheduler uses last accuracy as cirterion
         if lr_scheduler:
@@ -208,16 +237,14 @@ if __name__ == '__main__':
         # Save model parameters
         checkpoint_path = os.path.join(training_dir, f'model_{epoch + 1}')
         torch.save(model.state_dict(), checkpoint_path)
-        log(logfile, f'Saved model to {checkpoint_path}')
+        print(f'Saved model to {checkpoint_path}')
     
-    log(logfile, '\n### Testing:')
-    testing_metrics = evaluate_model(model, test_loader, loss_function, logfile=logfile)
+    print('\n### Testing:')
+    testing_metrics = evaluate_model(model, test_loader, loss_function, 'test', 0, tb_writer=tb_writer)
 
     with open(os.path.join(training_dir, 'stats.pkl'), 'wb') as f:
         pickle.dump({'train': training_metrics, 'val' : validation_metrics, 'test' : testing_metrics}, f)
 
-    if logfile is not None:
-        logfile.close()
 
 
 
