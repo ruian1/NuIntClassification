@@ -151,7 +151,8 @@ if __name__ == '__main__':
     else:
         tb_writer = None
 
-    tb_writer.add_hparams(hparam_dict={'configuration' : str(settings)}, metric_dict={})
+    #tb_writer.add_hparams(hparam_dict={'configuration' : str(settings)}, metric_dict={})
+    tb_writer.add_text('configuration', str(settings))
 
     # Save a copy of the settings
     with open(os.path.join(training_dir, 'config.json'), 'w+') as f:
