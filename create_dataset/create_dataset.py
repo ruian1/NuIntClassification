@@ -122,9 +122,13 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1.0, charge_sc
     omkeys : ndarray, shape [N, 3]
         Omkeys for the doms that were active during this event.
     """
-    x = frame['SRTTWOfflinePulsesDC']
-    hits = x.apply(frame)
-    track_reco = frame['IC86_Dunkman_L6_PegLeg_MultiNest8D_Track']
+    #x = frame['SRTTWOfflinePulsesDC'] #for oscNext
+    x = frame['SRTInIcePulses'] #for Meows
+    #hits = x.apply(frame)
+    hits = x
+    #print("hits are...")
+    #print(hits)
+    #track_reco = frame['IC86_Dunkman_L6_PegLeg_MultiNest8D_Track']
 
     features = {feature : [] for feature in vertex_features}
     vertices = {axis : [] for axis in ('x', 'y', 'z')}
@@ -133,7 +137,7 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1.0, charge_sc
     omkeys = []
     for omkey, pulses in hits:
         omkey = tuple(omkey) # The pickle maps triplets to positions
-        expected_time = dom_get_expected_time(omkey, track_reco)
+        #expected_time = dom_get_expected_time(omkey, track_reco)
         charges, times = [], []
         for pulse in pulses:
             if pulse.charge >= charge_threshold:
@@ -143,7 +147,8 @@ def get_events_from_frame(frame, charge_threshold=0.5, time_scale=1.0, charge_sc
         charges = np.array(charges) * charge_scale
         if charges.shape[0] == 0: continue # Don't use DOMs that recorded no charge above the threshold
         times = np.array(times)
-        time_delta = (times - expected_time + track_reco.time) * time_delta_scale
+        #time_delta = (times - expected_time + track_reco.time) * time_delta_scale
+        time_delta = (times) * time_delta_scale
         times = times * time_scale
         # Calculate the charge weighted standard devation of times
         charge_weighted_mean_time = np.average(times, weights=charges)
@@ -225,12 +230,20 @@ def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_t
     ### Meta data of the event for analysis of the classifier and creation of ground truth
     nu = dataclasses.get_most_energetic_neutrino(frame['I3MCTree'])
 
+    if nu.is_cascade: print(nu.is_cascade)
+
+    #print(nu)
+
     # Obtain the PDG Encoding for ground truth
     frame['PDGEncoding'] = dataclasses.I3Double(nu.pdg_encoding)
-    frame['InteractionType'] = dataclasses.I3Double(frame['I3MCWeightDict']['InteractionType'])
-    frame['NumberChannels'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['NchCleaned'])
-    frame['DCFiducialPE'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['DCFiducialPE'])
-    frame['NeutrinoEnergy'] = dataclasses.I3Double(frame['trueNeutrino'].energy)
+    #frame['InteractionType'] = dataclasses.I3Double(frame['I3MCWeightDict']['InteractionType'])
+    frame['InteractionType'] = dataclasses.I3Double(1) if nu.is_cascade else dataclasses.I3Double(0)
+    
+    #frame['NumberChannels'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['NchCleaned'])
+    #frame['DCFiducialPE'] = dataclasses.I3Double(frame['IC86_Dunkman_L3_Vars']['DCFiducialPE'])
+    #frame['NeutrinoEnergy'] = dataclasses.I3Double(frame['trueNeutrino'].energy)
+    frame['NeutrinoEnergy'] = dataclasses.I3Double(nu.energy)
+
     # Some rare events do not produce a cascade
     try:
         frame['CascadeEnergy'] = dataclasses.I3Double(frame['trueCascade'].energy)
@@ -243,7 +256,7 @@ def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_t
     except:
         frame['MuonEnergy'] = dataclasses.I3Double(np.nan)
         frame['TrackLength'] = dataclasses.I3Double(np.nan)
-    frame['DeltaLLH'] = dataclasses.I3Double(frame['IC86_Dunkman_L6']['delta_LLH']) # Used for a baseline classifcation
+    #frame['DeltaLLH'] = dataclasses.I3Double(frame['IC86_Dunkman_L6']['delta_LLH']) # Used for a baseline classifcation
     frame['RunID'] = icetray.I3Int(frame['I3EventHeader'].run_id)
     frame['EventID'] = icetray.I3Int(frame['I3EventHeader'].event_id)
     frame['PrimaryEnergy'] = dataclasses.I3Double(nu.energy)
@@ -254,9 +267,10 @@ def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_t
         frame[feature_name] = dataclasses.I3VectorFloat(features[feature_name])
     
     ### Create offset lookups for the flattened feature arrays per event
-    frame['NumberVertices'] = icetray.I3Int(len(features[features.keys()[0]]))
+    frame['NumberVertices'] = icetray.I3Int(len(features[list(features.keys())[0]]))
     #frame['Offset'] = icetray.I3Int(event_offset)
-    event_offset += len(features[features.keys()[0]])
+    #???
+    #event_offset += len(features[features.keys()[0]])
 
     ### Create coordinates for each vertex
     C = np.vstack(coordinates.values()).T
@@ -289,16 +303,19 @@ def process_frame(frame, charge_scale=1.0, time_scale=1e-3, append_coordinates_t
     frame['PrimaryAzimuth'] = dataclasses.I3Double(nu.dir.azimuth)
     frame['PrimaryZenith'] = dataclasses.I3Double(nu.dir.zenith)
 
+    #print(frame['PrimaryAzimuth'])
+
     ### Compute possible reco inputs that apply to entire event sets
-    track_reco = frame['IC86_Dunkman_L6_PegLeg_MultiNest8D_Track']
-    frame['RecoX'] = dataclasses.I3Double((track_reco.pos.x - C_mean[0]) / C_std[0])
-    frame['RecoY'] = dataclasses.I3Double((track_reco.pos.y - C_mean[1]) / C_std[1])
-    frame['RecoZ'] = dataclasses.I3Double((track_reco.pos.z - C_mean[2]) / C_std[2])
-    frame['COGCenteredRecoX'] = dataclasses.I3Double((track_reco.pos.x - C_mean_cog[0]) / C_std_cog[0])
-    frame['COGCenteredRecoY'] = dataclasses.I3Double((track_reco.pos.y - C_mean_cog[1]) / C_std_cog[1])
-    frame['COGCenteredRecoZ'] = dataclasses.I3Double((track_reco.pos.z - C_mean_cog[2]) / C_std_cog[2])
-    frame['RecoAzimuth'] = dataclasses.I3Double(track_reco.dir.azimuth)
-    frame['RecoZenith'] = dataclasses.I3Double(track_reco.dir.zenith)
+    #track_reco = frame['IC86_Dunkman_L6_PegLeg_MultiNest8D_Track']
+    #frame['RecoX'] = dataclasses.I3Double((track_reco.pos.x - C_mean[0]) / C_std[0])
+    #frame['RecoY'] = dataclasses.I3Double((track_reco.pos.y - C_mean[1]) / C_std[1])
+    #frame['RecoZ'] = dataclasses.I3Double((track_reco.pos.z - C_mean[2]) / C_std[2])
+    #frame['COGCenteredRecoX'] = dataclasses.I3Double((track_reco.pos.x - C_mean_cog[0]) / C_std_cog[0])
+    #frame['COGCenteredRecoY'] = dataclasses.I3Double((track_reco.pos.y - C_mean_cog[1]) / C_std_cog[1])
+    #frame['COGCenteredRecoZ'] = dataclasses.I3Double((track_reco.pos.z - C_mean_cog[2]) / C_std_cog[2])
+    #frame['RecoAzimuth'] = dataclasses.I3Double(track_reco.dir.azimuth)
+    #frame['RecoZenith'] = dataclasses.I3Double(track_reco.dir.zenith)
+    
     return True
 
 def create_dataset(outfile, infiles):
@@ -346,17 +363,27 @@ def create_dataset(outfile, infiles):
         'CMeans', 'COGCenteredCMeans',
         ], 
                 TableService=I3HDFTableService(outfile),
-                SubEventStreams=['InIceSplit'],
+                SubEventStreams=['TTrigger'],
                 BookEverything=False
                 )
     tray.Execute()
     tray.Finish()
 
 if __name__ == '__main__':
-    file_idx = int(sys.argv[1])
+    #file_idx = int(sys.argv[1])
     paths = []
-    for interaction_type in ('nue', 'numu', 'nutau'):
-        paths += glob('/project/6008051/hignight/dragon_3y/{0}/*'.format(interaction_type))
-    assert(len(paths) == 1104)
-    outfile = '/project/6008051/fuchsgru/data/data_dragon8_parts/{0}.hd5'.format(file_idx)
-    create_dataset(outfile, [paths[file_idx]])
+    #for interaction_type in ('nue', 'numu', 'nutau'):
+    #    paths += glob('/project/6008051/hignight/dragon_3y/{0}/*'.format(interaction_type))
+    #assert(len(paths) == 1104)
+    #outfile = '/project/6008051/fuchsgru/data/data_dragon8_parts/{0}.hd5'.format(file_idx)
+    #create_dataset(outfile, [paths[file_idx]])
+
+    
+    paths += glob('/data/ana/SterileNeutrino/IC86/HighEnergy/SPE_Templates/Nominal/Ares/IC86.AVG/XLevel/domeff_0.97/00001-01000/*')
+    outfile = "./data/out_feb16.hd"
+    create_dataset(outfile, paths)
+
+    #test_input = "/data/ana/SterileNeutrino/IC86/HighEnergy/SPE_Templates/Nominal/Ares/IC86.AVG/XLevel/domeff_0.97/00001-01000/XLevel_00_11_00001.i3.zst"
+    #test_input = "/data/ana/LE/oscNext/pass2/genie/level7_v02.00/140000/oscNext_genie_level7_v02.00_pass2.140000.000014.i3.zst"
+    #outfile = "./data/out_feb15.hd"5
+    #create_dataset(outfile, [test_input])

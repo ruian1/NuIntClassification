@@ -27,6 +27,7 @@ def create_dataset(f, idxs, dir, prefix, column_types):
 
     with h5py.File(os.path.join(dir, f'{prefix}.hd5'), 'w') as out:
         for key in f.keys():
+            if key == '__I3Index__': continue            
             if column_types[key] == 'event':
                 shape = (N_events,)
                 column = 'value'
@@ -78,8 +79,8 @@ def create_dataset(f, idxs, dir, prefix, column_types):
         
 
 if __name__ == '__main__':
-    input = '../data/data_dragon8.hd5'
-    output = '../data/data_dragon8_split'
+    input = './data/out_feb16.hd'
+    output = '/data/user/ran/out_split_feb16'
 
     os.makedirs(output, exist_ok=True)
 
@@ -91,6 +92,8 @@ if __name__ == '__main__':
         # Mark each data column
         column_types = dict()
         for key in f.keys():
+            #print("key is ", key)
+            if key == '__I3Index__': continue
             N_col = f[key].shape[0]
             if N_col == N_events:
                 column_types[key] = 'event'
