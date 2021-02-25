@@ -14,13 +14,15 @@ import time
 import torch.utils.tensorboard as tb
 import datetime
 
-from sklearn.metrics import roc_auc_score, accuracy_score, f1_score, confusion_matrix
+from sklearn.metrics import roc_auc_score, accuracy_score, f1_score, confusion_matrix, mean_absolute_percentage_error
 from scipy.stats import spearmanr
 
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torch import nn
 
+def MAPELoss(output, target):
+  return torch.mean(torch.abs((target - output) / target))
 
 
 def get_metrics(y_true, y_pred):
@@ -39,7 +41,8 @@ def get_metrics(y_true, y_pred):
         A dict containing values for all metrics. 
     """
     metrics = defaultdict(float)
-    metrics['accuracy'] = accuracy_score(y_true, y_pred >= .5)
+    #metrics['accuracy'] = accuracy_score(y_true, y_pred >= .5)
+    metrics['accuracy'] = mean_absolute_percentage_error(y_true, y_pred)
     try: 
         metrics['auc'] = roc_auc_score(y_true, y_pred)
     except: 
@@ -80,7 +83,8 @@ def evaluate_model(model, data_loader, loss_function, prefix, iteration, tb_writ
     for batch_idx, (inputs, y_i, weights) in enumerate(data_loader):
         print(f'\rEvaluating {batch_idx + 1} / {len(data_loader)}', end='\r')
         y_pred_i = model(*inputs)
-        loss = loss_function(y_pred_i, y_i, weights)
+        #loss = loss_function(y_pred_i, y_i, weights)
+        loss = loss_function(y_pred_i, y_i)
         y_pred[batch_idx * data_loader.batch_size : (batch_idx + 1) * data_loader.batch_size] = y_pred_i.data.cpu().numpy().squeeze()
         y_true[batch_idx * data_loader.batch_size : (batch_idx + 1) * data_loader.batch_size] = y_i.data.cpu().numpy().squeeze()
         total_loss += loss.item()
@@ -96,6 +100,7 @@ def evaluate_model(model, data_loader, loss_function, prefix, iteration, tb_writ
         tb_writer.add_scalar(f'{prefix} spearman correlation energy - trackness', spearmanr(energy, y_pred.flatten())[0], iteration)
     
     values = ' -- '.join(map(lambda metric: f'{metric} : {(metrics[metric]):.4f}', metrics))
+
     print(f'\nMetrics: {values}')
     return metrics
 
@@ -109,8 +114,8 @@ if __name__ == '__main__':
     parser.add_argument('--verbose', help='If set, logs to stdout.', action='store_true')
     args = parser.parse_args()
 
-
     verbose = args.verbose
+    print("verbose is", verbose)
     default_settings_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'default_settings.json')
     if args.array:
         config_path = glob(args.config)[args.i]
@@ -161,6 +166,7 @@ if __name__ == '__main__':
     # Load data
     batch_size = settings['training']['batch_size']
 
+    print("settings are >>>>", settings)
     data_train, data_val, data_test = util.dataset_from_config(settings)
     train_loader = DataLoader(data_train, batch_size=batch_size, shuffle=settings['dataset']['shuffle'], collate_fn=data_train.collate, drop_last=False)
     val_loader = DataLoader(data_val, batch_size=batch_size, shuffle=settings['dataset']['shuffle'], collate_fn=data_val.collate, drop_last=False)
@@ -173,6 +179,8 @@ if __name__ == '__main__':
         print("GPU type:\n{}".format(torch.cuda.get_device_name(0)))
     if settings['training']['loss'].lower() == 'binary_crossentropy':
         loss_function = nn.functional.binary_cross_entropy
+        loss_function = nn.functional.l1_loss
+        loss_function = MAPELoss
     else:
         raise RuntimeError(f'Unkown loss {settings["training"]["loss"]}')
 
@@ -201,9 +209,21 @@ if __name__ == '__main__':
         model.train()
         t0 = time.time()
         for batch_idx, (inputs, targets, weights) in enumerate(train_loader):
+
+            #x, c, targets, weights = data_train[i]
+            #if np.sum(np.array(x)) : print(np.sum(np.array(x)))
+            #print("-----------------------------")
+            #print()
+
+            x, d, mask = inputs
+            #if(not torch.sum(x) == 0): print("!!")
+            
+            #print('targets are ', targets)
             optimizer.zero_grad()
             y_pred = model(*inputs)
-            loss = loss_function(y_pred, targets, weight=weights)
+            #print("fuck2", y_pred)
+            #loss = loss_function(y_pred, targets, weight=weights)
+            loss = loss_function(y_pred, targets)
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
@@ -211,6 +231,7 @@ if __name__ == '__main__':
             y_pred = y_pred.data.cpu().numpy()
             batch_metrics = get_metrics(targets, y_pred)
             for metric, value in batch_metrics.items():
+                #print(batch_metrics.items())
                 training_metrics[metric].append(value)
             running_accuracy += batch_metrics['accuracy']
             # Estimate ETA

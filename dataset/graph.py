@@ -39,7 +39,11 @@ class ShuffledGraphTorchHD5Dataset(ShuffledTorchHD5Dataset):
         self.feature_names = features
         self.coordinate_names = coordinates
 
-        targets = self._create_targets()
+        print(features)
+        
+        #targets = self._create_targets()
+        targets = self._create_angle_targets()
+        
         self._idxs = self._create_idxs(targets, balance_dataset, min_track_length, max_cascade_energy, flavors, currents)
         number_vertices = np.array(self.file['NumberVertices'])
         event_offsets = (number_vertices.cumsum() - number_vertices)[self._idxs]
@@ -60,6 +64,7 @@ class ShuffledGraphTorchHD5Dataset(ShuffledTorchHD5Dataset):
         ]).encode()).hexdigest()
 
         feature_memmap_path = os.path.join(memmap_directory, f'hd5_features_{features_hash}_{self._idxs_hash}')
+        print("feature_memmap_path is,", feature_memmap_path)
         coordinate_memmap_path = os.path.join(memmap_directory, f'hd5_coordinates_{coordinates_hash}_{self._idxs_hash}')
 
         if not os.path.exists(feature_memmap_path) or not os.path.exists(coordinate_memmap_path):
@@ -92,7 +97,7 @@ class ShuffledGraphTorchHD5Dataset(ShuffledTorchHD5Dataset):
         offset = self.event_offsets[idx]
         X = self.features[offset : offset + N]
         C = self.coordinates[offset : offset + N]
-        return X, C, self.targets[idx], self.weights[idx]
+        return  X, C, self.targets[idx], self.weights[idx]
 
     @staticmethod
     def collate(samples):

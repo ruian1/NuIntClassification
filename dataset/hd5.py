@@ -23,6 +23,14 @@ class ShuffledTorchHD5Dataset(torch.utils.data.Dataset):
         """
         self.file = h5py.File(filepath, 'r')
 
+    def _create_angle_targets(self, which='azimuth'):
+
+        angles = np.array(self.file['PrimaryAzimuth'], dtype=np.float64)
+        which = which.lower()
+        if (which == 'zenith'): angles = np.array(self.file['PrimaryZenith'], dtype=np.float64)
+
+        return angles
+
     def _create_targets(self):
         """ Creates targets for classification based on some filtered indices. 
         

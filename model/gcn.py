@@ -44,11 +44,13 @@ class GraphConvolutionalNetwork(nn.Module):
             for idx, (D, D_prime) in enumerate(zip([units_graph_convolutions[-1]] + units_fully_connected[:-1], units_fully_connected)):
                 is_last_layer = idx == len(units_fully_connected) - 1
                 self.layers_fully_connected.append(nn.Linear(D, D_prime, bias=True))
+
                 if not is_last_layer:
                     self.layers_fully_connected.append(nn.ReLU())
                 else:
-                    self.layers_fully_connected.append(nn.Sigmoid())
-        
+                    #self.layers_fully_connected.append(nn.Sigmoid())
+                    self.layers_fully_connected.append(nn.ReLU())
+
     def forward(self, X, D, masks):
         """ Forward pass.
         
@@ -73,6 +75,7 @@ class GraphConvolutionalNetwork(nn.Module):
         # Fully connecteds, (usually only 1 layer, i.e. logistic regression)
         for layer in self.layers_fully_connected:
             X = layer(X)
+            
         return X
     
             
